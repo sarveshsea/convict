@@ -67,16 +67,21 @@ class PipelineOrchestrator:
             self._camera.stop()
 
     def status(self) -> dict:
-        from convict.engines.observation.mjpeg_streamer import streamer2
+        from convict.engines.observation.mjpeg_streamer import streamer, streamer2
+        # camera_active only if thread is alive AND streamer received a frame recently
+        cam_active = bool(
+            self._camera and self._camera.is_active and streamer.is_active
+        )
+        id_health = self._processor.identity_health if self._processor else 0.0
         return {
             "running":                    self._running,
             "started_at":                 self._started_at.isoformat() if self._started_at else None,
-            "camera_active":              self._camera.is_active if self._camera else False,
+            "camera_active":              cam_active,
             "cam2_active":                streamer2.is_active,
             "detection_fps":              round(self._detection_fps, 1),
             "inference_latency_ms":       round(self._inference_latency_ms, 1),
             "track_count":                self._track_count,
-            "identity_resolution_health": 0.0,
+            "identity_resolution_health": id_health,
             "queue_lag_frames":           0,
         }
 

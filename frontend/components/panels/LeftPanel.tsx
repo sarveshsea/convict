@@ -152,12 +152,14 @@ function AddFishInline() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!species.trim()) return
-    const commonMatch = species.match(/\(([^)]+)\)/)
-    const name = commonMatch ? commonMatch[1] : species.split(" ").slice(0, 2).join(" ")
+    // Use selected species from dropdown, or fall back to whatever was typed
+    const finalSpecies = species.trim() || query.trim()
+    if (!finalSpecies) return
+    const commonMatch = finalSpecies.match(/\(([^)]+)\)/)
+    const name = commonMatch ? commonMatch[1] : finalSpecies.split(" ").slice(0, 2).join(" ")
     setLoading(true)
     try {
-      const f = await createFish({ name, species: species.trim(), size_class: size, temperament: temp })
+      const f = await createFish({ name, species: finalSpecies, size_class: size, temperament: temp })
       addFish(f)
       setQuery(""); setSpecies(""); setOpen(false)
     } catch {}
@@ -226,7 +228,7 @@ function AddFishInline() {
             ))}
           </div>
 
-          <button type="submit" disabled={!species || loading}
+          <button type="submit" disabled={(!species && !query) || loading}
             className="w-full text-base font-mono py-2 rounded border border-zinc-700 text-zinc-400 hover:text-foreground hover:border-zinc-600 transition-colors disabled:opacity-30">
             {loading ? "adding…" : "+ add"}
           </button>

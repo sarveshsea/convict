@@ -58,7 +58,8 @@ async def delete_fish(fish_uuid: str, db: AsyncSession = Depends(get_db)):
 async def fish_snapshot(fish_uuid: str):
     if not re.match(r"^[0-9a-f-]+$", fish_uuid):
         raise HTTPException(status_code=400, detail="Invalid uuid")
-    path = Path("data/snapshots") / f"{fish_uuid}.jpg"
+    from convict.config import settings
+    path = settings.db_path.parent / "snapshots" / f"{fish_uuid}.jpg"
     if not path.exists():
         raise HTTPException(status_code=404, detail="No snapshot available")
     return FileResponse(str(path), media_type="image/jpeg")

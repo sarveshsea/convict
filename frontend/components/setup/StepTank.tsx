@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button"
 
 export function StepTank({ onNext }: { onNext: () => void }) {
   const { tank, setTank } = useTankStore()
-  const [name, setName] = useState(tank?.name ?? "South American Cichlid 60G")
-  const [gallons, setGallons] = useState(String(tank?.volume_gallons ?? 60))
+  const [name, setName] = useState(tank?.name ?? "")
+  const [gallons, setGallons] = useState(String(tank?.volume_gallons ?? ""))
   const [notes, setNotes] = useState(tank?.notes ?? "")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

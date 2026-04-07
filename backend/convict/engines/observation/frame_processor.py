@@ -97,6 +97,10 @@ class FrameProcessor:
 
         await self._streamer.push(jpeg_bytes)
 
+        # Save per-fish snapshots for identified entities (debounced — 60s min interval)
+        if any(e["identity"]["fish_id"] for e in entities):
+            await asyncio.to_thread(self._save_snapshots, enhanced, entities)
+
         self._seq += 1
         self._latency_ring.append(time.monotonic() - t0)
 
@@ -324,6 +328,43 @@ class FrameProcessor:
         return buf.tobytes()
 
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _save_snapshots(frame: np.ndarray, entities: list[dict]) -> None:
+        """Save a cropped JPEG for each confidently-identified fish (max once per 60s)."""
+        import time
+        snap_dir = settings.db_path.parent / "snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        h, w = frame.shape[:2]
+        for e in entities:
+            ident = e["identity"]
+            if not ident["fish_id"] or ident["confidence"] < 0.70:
+                continue
+            snap_path = snap_dir / f"{ident['fish_id']}.jpg"
+            if snap_path.exists() and (now - snap_path.stat().st_mtime) < 60:
+                continue
+            x1, y1, x2, y2 = [int(v) for v in e["bbox"]]
+            pad_x = max(8, int((x2 - x1) * 0.12))
+            pad_y = max(8, int((y2 - y1) * 0.12))
+            crop = frame[max(0, y1 - pad_y):min(h, y2 + pad_y),
+                         max(0, x1 - pad_x):min(w, x2 + pad_x)]
+            if crop.size == 0:
+                continue
+            cv2.imwrite(str(snap_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 88])
+
+    @property
+    def identity_health(self) -> float:
+        """Mean EMA confidence across all currently-identified tracks (0–1)."""
+        if self._resolver is None:
+            return 0.0
+        try:
+            hyps = self._resolver.top_hypotheses()
+            if not hyps:
+                return 0.0
+            return round(sum(h["confidence"] for h in hyps) / len(hyps), 3)
+        except Exception:
+            return 0.0
 
     @property
     def fps(self) -> float:

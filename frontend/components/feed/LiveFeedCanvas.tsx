@@ -158,6 +158,7 @@ function CameraPane({
   frameWidth,
   frameHeight,
   nightMode,
+  pipelineActive,
 }: {
   src: string
   label: string
@@ -165,10 +166,31 @@ function CameraPane({
   frameWidth: number
   frameHeight: number
   nightMode: boolean
+  pipelineActive: boolean
 }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const canvasRef     = useRef<HTMLCanvasElement>(null)
+  const retryTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryDelay    = useRef(2000)
   const [streamOk, setStreamOk] = useState(true)
+
+  // When pipeline comes back online, reset backoff and immediately try the stream
+  useEffect(() => {
+    if (pipelineActive && !streamOk) {
+      retryDelay.current = 2000
+      setStreamOk(true)
+    }
+  }, [pipelineActive])
+
+  function scheduleRetry() {
+    if (retryTimer.current) clearTimeout(retryTimer.current)
+    retryTimer.current = setTimeout(() => {
+      setStreamOk(true)
+      retryDelay.current = Math.min(retryDelay.current * 2, 16000)
+    }, retryDelay.current)
+  }
+
+  useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current) }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -205,12 +227,8 @@ function CameraPane({
         src={src}
         alt={label}
         className="absolute inset-0 w-full h-full object-contain"
-        onLoad={() => setStreamOk(true)}
-        onError={() => {
-          setStreamOk(false)
-          // retry after 2s — backend may still be warming up
-          setTimeout(() => setStreamOk(true), 2000)
-        }}
+        onLoad={() => { setStreamOk(true); retryDelay.current = 2000 }}
+        onError={() => { setStreamOk(false); scheduleRetry() }}
       />
 
       <canvas
@@ -252,6 +270,7 @@ export function LiveFeedCanvas() {
   const frameWidth      = useObservationStore((s) => s.frameWidth)
   const frameHeight     = useObservationStore((s) => s.frameHeight)
   const nightMode       = useObservationStore((s) => s.nightMode)
+  const pipelineActive  = useObservationStore((s) => s.pipeline.camera_active)
   const cam2Active      = useObservationStore((s) => s.pipeline.cam2_active)
   const cam2Entities    = useObservationStore((s) => s.cam2Entities)
   const cam2FrameWidth  = useObservationStore((s) => s.cam2FrameWidth)
@@ -267,6 +286,7 @@ export function LiveFeedCanvas() {
         frameWidth={frameWidth}
         frameHeight={frameHeight}
         nightMode={nightMode}
+        pipelineActive={pipelineActive}
       />
 
       {/* Cam 2 — only shown when backend confirms it's streaming */}
@@ -280,6 +300,7 @@ export function LiveFeedCanvas() {
             frameWidth={cam2FrameWidth}
             frameHeight={cam2FrameHeight}
             nightMode={nightMode}
+            pipelineActive={cam2Active}
           />
         </>
       )}

@@ -153,6 +153,33 @@ else:
     print("  On Linux you may need: sudo usermod -aG video $USER  (then log out/in)")
 PY
 
+# ── Remote access — write frontend .env.local with LAN IP ────────────────────
+FRONTEND_ENV="$FRONTEND/.env.local"
+LAN_IP=""
+# Try Linux first, then macOS
+LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "$LAN_IP" ]; then
+    LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+fi
+
+if [ -n "$LAN_IP" ] && [ "$LAN_IP" != "127.0.0.1" ]; then
+    echo ""
+    echo "=== Remote access ==="
+    echo "  LAN IP detected: $LAN_IP"
+    if [ ! -f "$FRONTEND_ENV" ] || ! grep -q "NEXT_PUBLIC_API_URL" "$FRONTEND_ENV"; then
+        cat >> "$FRONTEND_ENV" <<ENV
+
+# Remote access — allows viewing Convict from other machines (e.g. your Mac)
+# The frontend JS runs in the browser, so it needs the Yoga 5's LAN IP to reach the backend.
+NEXT_PUBLIC_API_URL=http://$LAN_IP:8000
+NEXT_PUBLIC_WS_URL=ws://$LAN_IP:8000/api/v1/stream/ws
+ENV
+        echo "  Written to frontend/.env.local — access from Mac at: http://$LAN_IP:3000"
+    else
+        echo "  frontend/.env.local already has API URL — skipping"
+    fi
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Setup complete ==="
@@ -166,4 +193,9 @@ echo ""
 echo "  Terminal 2 — frontend:"
 echo "    cd frontend && npm run dev"
 echo ""
-echo "  Open: http://localhost:3000"
+if [ -n "$LAN_IP" ] && [ "$LAN_IP" != "127.0.0.1" ]; then
+    echo "  Local:   http://localhost:3000"
+    echo "  From Mac: http://$LAN_IP:3000"
+else
+    echo "  Open: http://localhost:3000"
+fi
