@@ -1,6 +1,6 @@
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     mjpeg_fps: int = 12
 
     # Background subtractor tuning
-    bg_var_threshold: int = 80        # higher = less sensitive (was 40 — too noisy)
-    bg_min_area: int = 2000           # min blob area px² in original frame coords
+    bg_var_threshold: int = 50        # higher = less sensitive
+    bg_min_area: int = 600            # min blob area px² in original frame coords
     bg_max_area: int = 120_000        # max blob area (ignore near-full-frame detections)
-    bg_warmup_frames: int = 150       # frames to learn background before emitting
+    bg_warmup_frames: int = 80        # frames to learn background before emitting
 
     # Nighttime mode
     # Priority: schedule → NXT sensor → frame brightness fallback
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     # Tracker
     tracker_max_age: int = 30
-    tracker_min_hits: int = 5         # entity must be seen 5 consecutive frames before showing
+    tracker_min_hits: int = 3         # entity must be seen 3 consecutive frames before showing
     trail_length: int = 30       # centroids kept in WS payload
     centroid_history_len: int = 150  # in-memory centroid deque per track
 
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     anomaly_check_interval_frames: int = 60      # check every ~12s
 
     # AutoRegistrar
-    auto_register_min_stable_frames: int = 300   # ~25s at 12fps before auto-creating fish
+    auto_register_min_stable_frames: int = 60    # ~5s at 12fps before auto-creating fish
     auto_register_color_dedup_threshold: float = 0.25  # L1 hist distance below this = same fish
     auto_register_hist_sample_frames: int = 30   # last N bboxes to average histogram from
 

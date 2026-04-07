@@ -14,11 +14,14 @@ Cost components (weights in settings, must sum to 1.0):
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 
 import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+
+log = logging.getLogger("convict.resolver")
 
 _SIZE_CM: dict[str, float] = {"small": 6.0, "medium": 13.0, "large": 22.0}
 
@@ -94,6 +97,10 @@ class IdentityResolver:
             smoothed = (1.0 - alpha) * prev + alpha * raw_conf
             self._hyp[tid][fid] = smoothed
 
+            log.debug(
+                "T%d → %s  raw=%.3f smoothed=%.3f (threshold=%.2f)",
+                tid, fish.name, raw_conf, smoothed, self._s.identity_min_confidence,
+            )
             if smoothed >= self._s.identity_min_confidence:
                 self._best[tid] = fid
                 e["identity"] = {
@@ -102,6 +109,7 @@ class IdentityResolver:
                     "confidence":    round(smoothed, 3),
                     "is_confirmed":  False,
                 }
+                log.info("Identified T%d as %s (%.0f%%)", tid, fish.name, smoothed * 100)
 
         # Prune stale tracks
         active = {e["track_id"] for e in entities}

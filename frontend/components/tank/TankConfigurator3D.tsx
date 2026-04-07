@@ -170,16 +170,37 @@ function WallTargets({
   )
 }
 
+/** World-space unit vector pointing away from the tank for each wall. */
+function wallOutward(wall: string): [number, number, number] {
+  switch (wall) {
+    case "front":  return [0, 0,  1]
+    case "back":   return [0, 0, -1]
+    case "left":   return [-1, 0, 0]
+    case "right":  return [ 1, 0, 0]
+    case "top":    return [0,  1, 0]
+    default:       return [0,  0,  1]
+  }
+}
+
 function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number; d: number }) {
   const pos  = wallPosition(cam.wall, cam.posU, cam.posV, w, h, d)
   const rot  = wallRotation(cam.wall)
   const size = Math.min(w, h, d) * 0.07
 
-  // Thumbnail anchored in world space above the tank top — independent of wall rotation
-  const thumbPos: [number, number, number] = [pos[0], h / 2 + size * 6, pos[2]]
+  // Thumbnail floats outside the wall the camera is mounted on
+  const out  = wallOutward(cam.wall)
+  const push = Math.min(w, h, d) * 1.4
+  // Lift horizontal-wall thumbnails slightly so they clear the camera body
+  const liftY = out[1] === 0 ? size * 3 : 0
+  const thumbPos: [number, number, number] = [
+    pos[0] + out[0] * push,
+    pos[1] + out[1] * push + liftY,
+    pos[2] + out[2] * push,
+  ]
 
   return (
     <>
+      {/* Camera body in wall-local space */}
       <group position={pos} rotation={rot}>
         {/* Body */}
         <mesh>
@@ -196,7 +217,7 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
           <coneGeometry args={[size * 3, size * 8, 4, 1, true]} />
           <meshBasicMaterial color="#F97316" transparent opacity={0.05} side={THREE.DoubleSide} wireframe />
         </mesh>
-        {/* Label above body */}
+        {/* Label */}
         <Html position={[0, size * 1.2, 0]} center style={{ pointerEvents: "none" }}>
           <span style={{
             fontSize: 9, color: "#FB923C", fontFamily: "monospace",
@@ -207,12 +228,25 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
         </Html>
       </group>
 
-      {/* Live feed thumbnail — world space, always above the tank top */}
+      {/* Tether: camera body → thumbnail */}
+      <Line
+        points={[pos as [number, number, number], thumbPos]}
+        color="#F97316"
+        lineWidth={0.8}
+        transparent
+        opacity={0.28}
+      />
+
+      {/* Live feed thumbnail — outside the wall, not overlapping the tank */}
       <group position={thumbPos}>
         <Html center style={{ pointerEvents: "none" }}>
           <div style={{
-            width: 90, border: "1px solid rgba(249,115,22,0.55)", borderRadius: 4,
-            overflow: "hidden", background: "#09090b", boxShadow: "0 2px 8px rgba(0,0,0,0.7)",
+            width: 110,
+            border: "1.5px solid rgba(249,115,22,0.6)",
+            borderRadius: 6,
+            overflow: "hidden",
+            background: "#09090b",
+            boxShadow: "0 4px 18px rgba(0,0,0,0.85), 0 0 0 1px rgba(249,115,22,0.10)",
           }}>
             <img
               src={streamUrl(cam.camIndex)}
@@ -220,11 +254,19 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
               alt=""
             />
             <div style={{
-              textAlign: "center", fontSize: 8, color: "#FB923C",
-              fontFamily: "monospace", padding: "2px 4px",
-              background: "rgba(9,9,11,0.9)", letterSpacing: "0.05em",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+              padding: "3px 6px",
+              background: "rgba(9,9,11,0.92)",
+              borderTop: "1px solid rgba(249,115,22,0.18)",
             }}>
-              CAM {cam.camIndex + 1}
+              <div style={{
+                width: 5, height: 5, borderRadius: "50%",
+                background: "#F97316", flexShrink: 0,
+                boxShadow: "0 0 4px rgba(249,115,22,0.7)",
+              }} />
+              <span style={{ fontSize: 8, color: "#FB923C", fontFamily: "monospace", letterSpacing: "0.08em" }}>
+                CAM {cam.camIndex + 1}
+              </span>
             </div>
           </div>
         </Html>
@@ -482,6 +524,8 @@ export function TankConfigurator3D() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "ok" | "err">("idle")
   const [showLive, setShowLive] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [editingCamId, setEditingCamId] = useState<string | null>(null)
+  const [replacingCamId, setReplacingCamId] = useState<string | null>(null)
 
   // Live entity data from the observation pipeline
   const liveEntities = useObservationStore(s => s.entities)
@@ -521,7 +565,17 @@ export function TankConfigurator3D() {
 
   const handleWallPlace = useCallback((wall: string, u: number, v: number) => {
     setPlacingCamera(false)
-    setPending({ wall, u, v })
+    setReplacingCamId(prev => {
+      if (prev) {
+        setCameras(p => p.map(c => c.id === prev
+          ? { ...c, wall: wall as CamPlacement["wall"], posU: u, posV: v }
+          : c
+        ))
+        return null
+      }
+      setPending({ wall, u, v })
+      return null
+    })
   }, [])
 
   const confirmCamera = () => {
@@ -718,16 +772,52 @@ export function TankConfigurator3D() {
             {cameras.length === 0
               ? <p className="text-[9px] font-mono text-zinc-700">No cameras placed</p>
               : cameras.map(c => (
-                <div key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 group">
-                  <div className="shrink-0 w-10 rounded overflow-hidden border border-zinc-700" style={{ aspectRatio: "16/9" }}>
-                    <img src={streamUrl(c.camIndex)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} alt="" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[9px] font-mono text-orange-300 truncate">{c.label}</p>
-                    <p className="text-[8px] font-mono text-zinc-600">{c.wall} · CAM {c.camIndex + 1}</p>
-                  </div>
-                  <button onClick={() => setCameras(p => p.filter(x => x.id !== c.id))}
-                    className="text-[9px] text-zinc-700 hover:text-red-400 leading-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0">×</button>
+                <div key={c.id}>
+                  {editingCamId === c.id ? (
+                    <div className="flex flex-col gap-2 p-2.5 rounded bg-zinc-900 border border-orange-500/40">
+                      <input
+                        autoFocus
+                        value={c.label}
+                        onChange={e => setCameras(p => p.map(x => x.id === c.id ? { ...x, label: e.target.value } : x))}
+                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-600"
+                      />
+                      <div className="flex gap-2">
+                        {[0, 1].map(idx => (
+                          <button key={idx} onClick={() => setCameras(p => p.map(x => x.id === c.id ? { ...x, camIndex: idx } : x))}
+                            className={`flex-1 flex flex-col rounded overflow-hidden border transition-all ${c.camIndex === idx ? "border-orange-500" : "border-zinc-700 hover:border-zinc-500"}`}>
+                            <img src={streamUrl(idx)} style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", display: "block" }} alt="" />
+                            <div className={`text-center text-[8px] font-mono py-0.5 ${c.camIndex === idx ? "bg-orange-500/20 text-orange-300" : "bg-zinc-900 text-zinc-500"}`}>
+                              CAM {idx + 1}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between px-2 py-1 rounded bg-zinc-800/60 text-[9px] font-mono text-zinc-500">
+                        <span>wall: <span className="text-orange-400">{c.wall}</span> · u:{c.posU.toFixed(2)} v:{c.posV.toFixed(2)}</span>
+                        <button
+                          onClick={() => { setReplacingCamId(c.id); setPlacingCamera(true) }}
+                          className="text-blue-400 hover:text-blue-300 transition-colors ml-2"
+                        >re-place →</button>
+                      </div>
+                      <button onClick={() => setEditingCamId(null)}
+                        className="text-[9px] font-mono bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded py-1 transition-colors">
+                        done
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 group cursor-pointer hover:bg-zinc-800/60 transition-colors"
+                      onClick={() => setEditingCamId(c.id)}>
+                      <div className="shrink-0 w-10 rounded overflow-hidden border border-zinc-700" style={{ aspectRatio: "16/9" }}>
+                        <img src={streamUrl(c.camIndex)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} alt="" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[9px] font-mono text-orange-300 truncate">{c.label}</p>
+                        <p className="text-[8px] font-mono text-zinc-600">{c.wall} · CAM {c.camIndex + 1}</p>
+                      </div>
+                      <button onClick={e => { e.stopPropagation(); setCameras(p => p.filter(x => x.id !== c.id)) }}
+                        className="text-[9px] text-zinc-700 hover:text-red-400 leading-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0">×</button>
+                    </div>
+                  )}
                 </div>
               ))
             }
@@ -831,8 +921,10 @@ export function TankConfigurator3D() {
         {placingCamera && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 px-4 py-2 rounded bg-zinc-900/90 border border-blue-800/60">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-            <span className="text-[9px] font-mono text-blue-300 uppercase tracking-widest">Click a wall to place</span>
-            <button onClick={() => setPlacingCamera(false)}
+            <span className="text-[9px] font-mono text-blue-300 uppercase tracking-widest">
+              {replacingCamId ? "Click a wall to move camera" : "Click a wall to place"}
+            </span>
+            <button onClick={() => { setPlacingCamera(false); setReplacingCamId(null) }}
               className="text-[9px] font-mono text-zinc-500 hover:text-white transition-colors">
               cancel
             </button>

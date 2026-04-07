@@ -100,21 +100,24 @@ class FrameProcessor:
         self._seq += 1
         self._latency_ring.append(time.monotonic() - t0)
 
-        now = datetime.now(timezone.utc).isoformat()
-        await broadcaster.broadcast({
-            "type":      "observation_frame",
-            "timestamp": now,
-            "seq":       self._seq,
-            "payload": {
-                "entities":        entities,
-                "frame_width":     fw,
-                "frame_height":    fh,
-                "fps":             self.fps,
-                "night_mode":      self._is_night,
-                "schedule_context": None,
-                "camera_index":    self._camera_index,
-            },
-        })
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            await broadcaster.broadcast({
+                "type":      "observation_frame",
+                "timestamp": now,
+                "seq":       self._seq,
+                "payload": {
+                    "entities":        entities,
+                    "frame_width":     fw,
+                    "frame_height":    fh,
+                    "fps":             self.fps,
+                    "night_mode":      self._is_night,
+                    "schedule_context": None,
+                    "camera_index":    self._camera_index,
+                },
+            })
+        except Exception:
+            pass
 
         return entities
 

@@ -1,9 +1,18 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from convict.config import settings
 from convict.database import init_db
 from convict.api.v1.router import router as v1_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Show debug from our own modules only
+logging.getLogger("convict").setLevel(logging.DEBUG)
 
 
 @asynccontextmanager

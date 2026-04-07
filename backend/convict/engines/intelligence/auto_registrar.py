@@ -25,15 +25,11 @@ import numpy as np
 if TYPE_CHECKING:
     from convict.engines.intelligence.identity_resolver import IdentityResolver
 
-# Rough cm-per-pixel for a 60cm-wide tank at the reference frame width.
-# Scaled to actual frame width at runtime.
-_TANK_WIDTH_CM = 60.0
-
 _SIZE_THRESHOLDS_CM = {"small": 9.0, "medium": 18.0}   # ≤9 small, ≤18 medium, else large
 
 
-def _px_to_cm(px_len: float, frame_width: int) -> float:
-    return px_len * (_TANK_WIDTH_CM / frame_width)
+def _px_to_cm(px_len: float, frame_width: int, tank_width_cm: float) -> float:
+    return px_len * (tank_width_cm / max(frame_width, 1))
 
 
 def _size_class(est_cm: float) -> str:
@@ -45,9 +41,10 @@ def _size_class(est_cm: float) -> str:
 
 
 class AutoRegistrar:
-    def __init__(self, settings, tank_id: int):
-        self._s       = settings
-        self._tank_id = tank_id
+    def __init__(self, settings, tank_id: int, tank_width_cm: float = 60.0):
+        self._s             = settings
+        self._tank_id       = tank_id
+        self._tank_width_cm = max(tank_width_cm, 1.0)
 
         # consecutive visible-frame count per track_id
         self._stable_count: dict[int, int] = defaultdict(int)
@@ -144,7 +141,7 @@ class AutoRegistrar:
         fh, fw = frame.shape[:2]
         x1, y1, x2, y2 = entity["bbox"]
         px_len  = max(x2 - x1, y2 - y1)
-        est_cm  = _px_to_cm(px_len, fw)
+        est_cm  = _px_to_cm(px_len, fw, self._tank_width_cm)
         s_class = _size_class(est_cm)
 
         # Dedup: check existing auto-detected fish for near-duplicate

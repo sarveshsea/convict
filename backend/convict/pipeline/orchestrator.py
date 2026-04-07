@@ -17,8 +17,12 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
+import logging
+
 from convict.config import settings
 from convict.engines.experience.ws_broadcaster import broadcaster
+
+log = logging.getLogger("convict.orchestrator")
 
 
 class PipelineOrchestrator:
@@ -110,9 +114,10 @@ class PipelineOrchestrator:
             pass
 
         # ---- AutoRegistrar (fish auto-discovery) ----------------------
+        tank_width_cm = float(getattr(tank, "width_cm", 60.0) or 60.0) if tank else 60.0
         auto_registrar = None
         if tank is not None:
-            auto_registrar = AutoRegistrar(settings, tank.id)
+            auto_registrar = AutoRegistrar(settings, tank.id, tank_width_cm=tank_width_cm)
             try:
                 async with AsyncSessionLocal() as db:
                     await auto_registrar.initialize(db)
@@ -138,7 +143,7 @@ class PipelineOrchestrator:
         tracker  = FishTracker(settings)
         tracker.reset()
 
-        resolver = IdentityResolver(settings, fish, zones)
+        resolver = IdentityResolver(settings, fish, zones, tank_width_cm=tank_width_cm)
         baseline = BaselineBuilder(settings)
         anomaly  = AnomalyDetector(settings, fish, baseline)
         patterns = PatternModeler(settings, fish, baseline)
@@ -168,10 +173,17 @@ class PipelineOrchestrator:
                 self._run_camera2(), name="camera2"
             )
 
-        min_interval    = settings.detection_interval_ms / 1000.0
-        status_interval = 2.0
-        last_inf_time   = 0.0
-        last_status_t   = 0.0
+        min_interval       = settings.detection_interval_ms / 1000.0
+        status_interval    = 2.0
+        fish_refresh_interval = 15.0   # re-sync fish list from DB every 15s
+        last_inf_time      = 0.0
+        last_status_t      = 0.0
+        last_fish_refresh  = 0.0
+
+        log.info(
+            "Pipeline started — detector=%s  fish=%d  tank_width_cm=%.1f",
+            settings.detector_type, len(fish), tank_width_cm,
+        )
 
         try:
             while self._running:
@@ -188,6 +200,27 @@ class PipelineOrchestrator:
 
                 entities = await processor.process(frame)
 
+                # Periodic fish-list refresh — picks up manually-added fish
+                now_mono = time.monotonic()
+                if now_mono - last_fish_refresh >= fish_refresh_interval:
+                    try:
+                        async with AsyncSessionLocal() as db:
+                            fresh_fish = await list_fish(db)
+                        if len(fresh_fish) != len(fish):
+                            log.info(
+                                "Fish list changed: %d → %d, reloading resolver",
+                                len(fish), len(fresh_fish),
+                            )
+                        fish = fresh_fish
+                        resolver.reload_fish(fish)
+                        anomaly.update_known_fish(fish)
+                        patterns.update_known_fish(fish)
+                        predictor._fish = fish
+                        self._fish_list = fish
+                    except Exception:
+                        log.exception("Fish list refresh failed")
+                    last_fish_refresh = now_mono
+
                 # Auto-registration: watches for stable tracks and creates fish profiles
                 if auto_registrar is not None:
                     try:
@@ -203,6 +236,8 @@ class PipelineOrchestrator:
                             patterns.update_known_fish(fish)
                             predictor._fish = fish
                             self._fish_list = fish
+                            last_fish_refresh = time.monotonic()
+                            log.info("Auto-registered new fish — roster now %d", len(fish))
                             await broadcaster.broadcast({
                                 "type":      "fish_updated",
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -210,19 +245,25 @@ class PipelineOrchestrator:
                                 "payload":   {"reason": "auto_registered"},
                             })
                     except Exception:
-                        pass
+                        log.exception("Auto-registrar error")
 
-                baseline.update(entities)
+                try:
+                    baseline.update(entities)
+                except Exception:
+                    log.exception("Baseline update error")
 
-                new_events = anomaly.update(entities)
-                for ev in new_events:
-                    predictor.record_event(ev)
-                    await broadcaster.broadcast({
-                        "type":      "anomaly_flagged",
-                        "timestamp": ev["started_at"],
-                        "seq":       0,
-                        "payload":   ev,
-                    })
+                try:
+                    new_events = anomaly.update(entities)
+                    for ev in new_events:
+                        predictor.record_event(ev)
+                        await broadcaster.broadcast({
+                            "type":      "anomaly_flagged",
+                            "timestamp": ev["started_at"],
+                            "seq":       0,
+                            "payload":   ev,
+                        })
+                except Exception:
+                    log.exception("Anomaly update/broadcast error")
 
                 try:
                     async with AsyncSessionLocal() as db:
@@ -230,24 +271,30 @@ class PipelineOrchestrator:
                 except Exception:
                     pass
 
-                self._frame_times.append(time.monotonic())
-                if len(self._frame_times) >= 2:
-                    span = self._frame_times[-1] - self._frame_times[0]
-                    self._detection_fps = (
-                        round((len(self._frame_times) - 1) / span, 1) if span > 0 else 0.0
-                    )
-                self._inference_latency_ms = processor.last_latency_ms
-                self._track_count          = tracker.active_track_count
+                try:
+                    self._frame_times.append(time.monotonic())
+                    if len(self._frame_times) >= 2:
+                        span = self._frame_times[-1] - self._frame_times[0]
+                        self._detection_fps = (
+                            round((len(self._frame_times) - 1) / span, 1) if span > 0 else 0.0
+                        )
+                    self._inference_latency_ms = processor.last_latency_ms
+                    self._track_count          = tracker.active_track_count
+                except Exception:
+                    pass
 
-                now = time.monotonic()
-                if now - last_status_t >= status_interval:
-                    await broadcaster.broadcast({
-                        "type":      "pipeline_status",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "seq":       0,
-                        "payload":   self.status(),
-                    })
-                    last_status_t = now
+                try:
+                    now = time.monotonic()
+                    if now - last_status_t >= status_interval:
+                        await broadcaster.broadcast({
+                            "type":      "pipeline_status",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "seq":       0,
+                            "payload":   self.status(),
+                        })
+                        last_status_t = now
+                except Exception:
+                    log.exception("Status broadcast error")
 
         except asyncio.CancelledError:
             pass

@@ -168,7 +168,7 @@ function CameraPane({
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
-  const [streamOk, setStreamOk] = useState(false)
+  const [streamOk, setStreamOk] = useState(true)
 
   useEffect(() => {
     const container = containerRef.current
@@ -201,11 +201,16 @@ function CameraPane({
   return (
     <div ref={containerRef} className="relative flex-1 bg-zinc-950 overflow-hidden">
       <img
+        key={src}
         src={src}
         alt={label}
         className="absolute inset-0 w-full h-full object-contain"
         onLoad={() => setStreamOk(true)}
-        onError={() => setStreamOk(false)}
+        onError={() => {
+          setStreamOk(false)
+          // retry after 2s — backend may still be warming up
+          setTimeout(() => setStreamOk(true), 2000)
+        }}
       />
 
       <canvas
