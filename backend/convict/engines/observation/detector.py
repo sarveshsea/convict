@@ -289,6 +289,56 @@ class RFDETRDetector:
         )
 
 
+class YOLOOnnxDetector(FishDetector):
+    """
+    YOLOv8n via ONNX Runtime — no CUDA required, 2-3× faster than PyTorch
+    on Intel CPUs.  Exports .onnx from .pt on first run (one-time, ~30s).
+    Uses OpenVINO execution provider automatically if onnxruntime-openvino
+    is installed (Intel iGPU / VPU).
+    """
+
+    def load(self) -> None:
+        import logging
+        from pathlib import Path
+
+        log = logging.getLogger("convict.detector")
+
+        pt_path   = Path(str(self._settings.yolo_model_path))
+        onnx_path = pt_path.with_suffix(".onnx")
+
+        if not onnx_path.exists():
+            log.info("Exporting YOLOv8 → ONNX (one-time, ~30s)…")
+            from ultralytics import YOLO
+            base = YOLO(str(pt_path) if pt_path.exists() else "yolov8n.pt")
+            exported = base.export(
+                format="onnx",
+                imgsz=self._settings.inference_width,
+                simplify=True,
+                dynamic=False,
+            )
+            exp = Path(exported) if exported else pt_path.parent / "yolov8n.onnx"
+            if exp.exists() and exp != onnx_path:
+                exp.rename(onnx_path)
+            log.info("ONNX export saved → %s", onnx_path)
+
+        # Log which execution providers are active
+        try:
+            import onnxruntime as ort
+            providers = ort.get_available_providers()
+            active = next(
+                (p for p in ("OpenVINOExecutionProvider", "CoreMLExecutionProvider",
+                             "CUDAExecutionProvider", "CPUExecutionProvider")
+                 if p in providers),
+                "CPUExecutionProvider",
+            )
+            log.info("YOLOOnnxDetector: using %s", active)
+        except ImportError:
+            pass
+
+        from ultralytics import YOLO
+        self._model = YOLO(str(onnx_path))
+
+
 class MockDetector:
     """
     Returns detections from the MockCameraCapture's pre-computed

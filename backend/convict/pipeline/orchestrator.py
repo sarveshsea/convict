@@ -135,6 +135,9 @@ class PipelineOrchestrator:
                 detector = RFDETRDetector(settings)
             elif settings.detector_type == "yolo":
                 detector = FishDetector(settings)
+            elif settings.detector_type == "yolo_onnx":
+                from convict.engines.observation.detector import YOLOOnnxDetector
+                detector = YOLOOnnxDetector(settings)
             else:
                 from convict.engines.observation.detector import BackgroundSubtractorDetector
                 detector = BackgroundSubtractorDetector(settings)

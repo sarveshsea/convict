@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     camera_index_2: int = -1   # second camera device index; -1 = disabled
 
     # CV pipeline
-    detector_type: Literal["mog2", "yolo", "rfdetr"] = "mog2"
+    detector_type: Literal["mog2", "yolo", "yolo_onnx", "rfdetr"] = "mog2"
     yolo_model_path: Path = BASE_DIR / "data" / "models" / "yolov8n.pt"
     yolo_confidence: float = 0.35
     yolo_iou: float = 0.45
