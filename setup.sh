@@ -82,12 +82,13 @@ else
     PULLED_MODEL=""
     for MODEL in "gemma3:2b" "gemma2:2b" "gemma:2b"; do
         echo "    Trying: ollama pull $MODEL ..."
-        if ollama pull "$MODEL"; then
+        if ollama pull "$MODEL" 2>&1; then
             PULLED_MODEL="$MODEL"
             break
         fi
-        echo "    → $MODEL not available, trying next..."
+        echo "    → $MODEL unavailable, trying next..."
     done
+    true  # ensure loop failure doesn't trigger set -e
 
     kill "${OLLAMA_PID:-0}" 2>/dev/null || true
 
