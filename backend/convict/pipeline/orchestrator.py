@@ -458,7 +458,15 @@ class PipelineOrchestrator:
             capture_width  = settings.capture_width
             capture_height = settings.capture_height
 
-        log.info("Starting camera 2 detection pipeline at index %d", settings.camera_index_2)
+        # Try configured index first, then nearby indices.
+        # This helps on Windows where USB camera index ordering can shift.
+        candidate_indices = [settings.camera_index_2, 1, 2, 3, 4]
+        seen: set[int] = set()
+        candidate_indices = [i for i in candidate_indices if i >= 0 and not (i in seen or seen.add(i))]
+        current_idx_pos = 0
+        _Cam2Cfg.camera_index = candidate_indices[current_idx_pos]
+
+        log.info("Starting camera 2 detection pipeline at index %d", _Cam2Cfg.camera_index)
         cam2 = CameraCapture(_Cam2Cfg(), loop, q2)
         detector2 = BackgroundSubtractorDetector(settings)
         tracker2  = FishTracker(settings)
@@ -483,12 +491,26 @@ class PipelineOrchestrator:
                     frame = await asyncio.wait_for(q2.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     if not first_frame and time.monotonic() > deadline:
-                        log.warning(
-                            "Camera 2 (index %d) opened but no frames received after 5s — "
-                            "check device index and permissions",
-                            settings.camera_index_2,
-                        )
-                        deadline = float("inf")
+                        bad_index = _Cam2Cfg.camera_index
+                        if current_idx_pos + 1 < len(candidate_indices):
+                            current_idx_pos += 1
+                            next_index = candidate_indices[current_idx_pos]
+                            log.warning(
+                                "Camera 2 index %d produced no frames; switching to index %d",
+                                bad_index,
+                                next_index,
+                            )
+                            cam2.stop()
+                            _Cam2Cfg.camera_index = next_index
+                            cam2 = CameraCapture(_Cam2Cfg(), loop, q2)
+                            cam2.start()
+                            deadline = time.monotonic() + 5.0
+                        else:
+                            log.warning(
+                                "Camera 2 unavailable across indices %s; check USB bandwidth/power and permissions",
+                                candidate_indices,
+                            )
+                            deadline = float("inf")
                     continue
                 first_frame = True
 

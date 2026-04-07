@@ -7,6 +7,7 @@ export type WSMessageType =
   | "anomaly_flagged"
   | "prediction_created"
   | "prediction_updated"
+  | "fish_updated"
   | "event_detected"
   | "pipeline_status"
   | "baseline_updated"

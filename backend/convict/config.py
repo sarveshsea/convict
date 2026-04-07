@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # Server
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Database
     db_path: Path = BASE_DIR / "data" / "convict.db"

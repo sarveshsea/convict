@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import uuid as _uuid
 from collections import defaultdict, deque
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import cv2
@@ -191,7 +190,8 @@ class AutoRegistrar:
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 return
-            snapshots_dir = Path("data/snapshots")
+            # Must match API path: settings.db_path.parent / "snapshots" (not CWD-relative).
+            snapshots_dir = self._s.db_path.parent / "snapshots"
             snapshots_dir.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(snapshots_dir / f"{fish_uuid}.jpg"), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
         except Exception:

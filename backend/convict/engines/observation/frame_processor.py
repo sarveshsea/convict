@@ -339,7 +339,7 @@ class FrameProcessor:
         h, w = frame.shape[:2]
         for e in entities:
             ident = e["identity"]
-            if not ident["fish_id"] or ident["confidence"] < 0.70:
+            if not ident["fish_id"] or ident["confidence"] < 0.42:
                 continue
             snap_path = snap_dir / f"{ident['fish_id']}.jpg"
             if snap_path.exists() and (now - snap_path.stat().st_mtime) < 60:

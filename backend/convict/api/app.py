@@ -11,8 +11,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
-# Show debug from our own modules only
-logging.getLogger("convict").setLevel(logging.DEBUG)
+# Keep log volume configurable for lower-power machines.
+logging.getLogger("convict").setLevel(getattr(logging, settings.log_level, logging.INFO))
 
 
 @asynccontextmanager

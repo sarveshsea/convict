@@ -1,6 +1,6 @@
 "use client"
-import { useEffect, useRef, useState } from "react"
-import { STREAM_URL, STREAM_URL_2 } from "@/lib/constants"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { STREAM_URL, STREAM_URL_2, fishSnapshotUrl } from "@/lib/constants"
 import { useObservationStore } from "@/store/observationStore"
 import type { LiveEntity } from "@/store/observationStore"
 
@@ -128,6 +128,84 @@ function drawEntity(ctx: CanvasRenderingContext2D, e: LiveEntity, lb: Letterbox)
   }
 }
 
+function labelForEntity(e: LiveEntity): string {
+  const id = e.identity
+  if (id?.fish_name?.trim()) return id.fish_name.trim()
+  if (id?.species && id.species !== "Unknown") return extractCommonName(id.species)
+  return "Fish"
+}
+
+function FishThumbnailStrip({
+  entities,
+  frameSeq,
+}: {
+  entities: LiveEntity[]
+  frameSeq: number
+}) {
+  const items = useMemo(() => {
+    const best = new Map<string, { fishId: string; label: string; conf: number }>()
+    for (const e of entities) {
+      const fid = e.identity?.fish_id
+      if (!fid) continue
+      const conf = e.identity?.confidence ?? 0
+      if (conf < 0.42) continue
+      const label = labelForEntity(e)
+      const prev = best.get(fid)
+      if (!prev || conf > prev.conf) best.set(fid, { fishId: fid, label, conf })
+    }
+    return Array.from(best.values())
+      .sort((a, b) => a.conf - b.conf)
+      .slice(-6)
+  }, [entities])
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="absolute bottom-3 right-3 z-20 flex max-h-[min(55vh,420px)] flex-col justify-end gap-2 pointer-events-none">
+      {items.map(({ fishId, label, conf }) => (
+        <FishThumb key={fishId} fishId={fishId} label={label} conf={conf} frameSeq={frameSeq} />
+      ))}
+    </div>
+  )
+}
+
+function FishThumb({
+  fishId,
+  label,
+  conf,
+  frameSeq,
+}: {
+  fishId: string
+  label: string
+  conf: number
+  frameSeq: number
+}) {
+  const [imgOk, setImgOk] = useState(true)
+  return (
+    <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/12 bg-zinc-950/85 py-1.5 pl-1.5 pr-2.5 shadow-xl shadow-black/50 ring-1 ring-white/8 backdrop-blur-md">
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-zinc-800 ring-1 ring-white/10">
+        {imgOk ? (
+          <img
+            src={fishSnapshotUrl(fishId, frameSeq)}
+            alt={label}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            onError={() => setImgOk(false)}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-700 to-zinc-900 text-sm font-semibold text-zinc-400">
+            {label.slice(0, 1).toUpperCase()}
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-semibold leading-tight text-zinc-100">{label}</p>
+        <p className="font-mono text-[10px] tabular-nums text-emerald-400/90">{(conf * 100).toFixed(0)}% match</p>
+      </div>
+    </div>
+  )
+}
+
 function getCoverBox(fw: number, fh: number, cw: number, ch: number): Letterbox {
   const imgAspect = fw / fh
   const boxAspect = cw / ch
@@ -157,6 +235,7 @@ function CameraPane({
   entities,
   frameWidth,
   frameHeight,
+  frameSeq,
   nightMode,
   pipelineActive,
 }: {
@@ -165,6 +244,7 @@ function CameraPane({
   entities: LiveEntity[]
   frameWidth: number
   frameHeight: number
+  frameSeq: number
   nightMode: boolean
   pipelineActive: boolean
 }) {
@@ -173,6 +253,7 @@ function CameraPane({
   const retryTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const retryDelay    = useRef(2000)
   const [streamOk, setStreamOk] = useState(true)
+  const [box, setBox] = useState({ w: 0, h: 0 })
 
   // When pipeline comes back online, reset backoff and immediately try the stream
   useEffect(() => {
@@ -197,10 +278,16 @@ function CameraPane({
     const canvas    = canvasRef.current
     if (!container || !canvas) return
     const sync = () => {
-      canvas.width        = container.clientWidth
-      canvas.height       = container.clientHeight
-      canvas.style.width  = container.clientWidth  + "px"
-      canvas.style.height = container.clientHeight + "px"
+      const cw = container.clientWidth
+      const ch = container.clientHeight
+      setBox({ w: cw, h: ch })
+      const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
+      canvas.width = Math.max(1, Math.round(cw * dpr))
+      canvas.height = Math.max(1, Math.round(ch * dpr))
+      canvas.style.width = `${cw}px`
+      canvas.style.height = `${ch}px`
+      const ctx = canvas.getContext("2d")
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
     sync()
     const ro = new ResizeObserver(sync)
@@ -209,56 +296,62 @@ function CameraPane({
   }, [])
 
   useEffect(() => {
-    const canvas    = canvasRef.current
-    const container = containerRef.current
-    if (!canvas || !container) return
+    const canvas = canvasRef.current
+    if (!canvas || box.w < 1 || box.h < 1) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, box.w, box.h)
     if (entities.length === 0) return
-    const lb = getCoverBox(frameWidth, frameHeight, container.clientWidth, container.clientHeight)
+    const lb = getCoverBox(frameWidth, frameHeight, box.w, box.h)
     entities.forEach((e) => drawEntity(ctx, e, lb))
-  }, [entities, frameWidth, frameHeight])
+  }, [entities, frameWidth, frameHeight, box.w, box.h])
 
   return (
-    <div ref={containerRef} className="relative flex-1 bg-zinc-950 overflow-hidden">
+    <div
+      ref={containerRef}
+      className="relative flex-1 overflow-hidden bg-zinc-950 [box-shadow:inset_0_0_80px_rgba(0,0,0,0.45)]"
+    >
       <img
         key={src}
         src={src}
         alt={label}
-        className="absolute inset-0 w-full h-full object-contain"
-        onLoad={() => { setStreamOk(true); retryDelay.current = 2000 }}
-        onError={() => { setStreamOk(false); scheduleRetry() }}
+        className="absolute inset-0 h-full w-full object-contain [image-rendering:auto]"
+        onLoad={() => {
+          setStreamOk(true)
+          retryDelay.current = 2000
+        }}
+        onError={() => {
+          setStreamOk(false)
+          scheduleRetry()
+        }}
       />
 
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 pointer-events-none"
-        style={{ imageRendering: "crisp-edges" }}
-      />
+      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+
+      <FishThumbnailStrip entities={entities} frameSeq={frameSeq} />
 
       {/* Camera label badge */}
-      <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-700/50">
-        <div className={`w-1.5 h-1.5 rounded-full ${streamOk ? "bg-emerald-400" : "bg-zinc-600"}`} />
-        <span className="text-[9px] font-mono text-zinc-300 uppercase tracking-widest">{label}</span>
+      <div className="absolute top-3 left-3 flex items-center gap-2 rounded-lg border border-white/10 bg-zinc-950/75 px-2.5 py-1.5 shadow-lg backdrop-blur-md">
+        <div className={`h-2 w-2 rounded-full shadow-[0_0_8px_currentColor] ${streamOk ? "bg-emerald-400 text-emerald-400" : "bg-zinc-600 text-zinc-600"}`} />
+        <span className="text-[10px] font-medium tracking-wider text-zinc-200">{label}</span>
       </div>
 
       {nightMode && streamOk && (
-        <div className="absolute top-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-900/80 border border-zinc-700/50">
-          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-          <span className="text-[9px] font-mono text-indigo-300 uppercase tracking-widest">Night</span>
+        <div className="absolute top-3 right-3 flex items-center gap-2 rounded-lg border border-indigo-500/25 bg-indigo-950/60 px-2.5 py-1.5 backdrop-blur-md">
+          <div className="h-2 w-2 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]" />
+          <span className="text-[10px] font-medium tracking-wider text-indigo-200">Night</span>
         </div>
       )}
 
       {!streamOk && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
-          <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/80">
+          <div className="h-2 w-2 rounded-full bg-zinc-600" />
+          <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
             Camera offline
           </span>
-          <span className="text-[9px] font-mono text-zinc-600">
-            {label}
-          </span>
+          <span className="text-[9px] font-mono text-zinc-600">{label}</span>
         </div>
       )}
     </div>
@@ -266,6 +359,7 @@ function CameraPane({
 }
 
 export function LiveFeedCanvas() {
+  const frameSeq        = useObservationStore((s) => s.frameSeq)
   const entities        = useObservationStore((s) => s.entities)
   const frameWidth      = useObservationStore((s) => s.frameWidth)
   const frameHeight     = useObservationStore((s) => s.frameHeight)
@@ -277,14 +371,15 @@ export function LiveFeedCanvas() {
   const cam2FrameHeight = useObservationStore((s) => s.cam2FrameHeight)
 
   return (
-    <div className="absolute inset-0 flex">
+    <div className="absolute inset-0 flex gap-px bg-zinc-800/80 p-px">
       {/* Cam 1 — annotated detection feed */}
       <CameraPane
         src={STREAM_URL}
-        label="CAM 1"
+        label="Cam 1"
         entities={entities}
         frameWidth={frameWidth}
         frameHeight={frameHeight}
+        frameSeq={frameSeq}
         nightMode={nightMode}
         pipelineActive={pipelineActive}
       />
@@ -292,13 +387,14 @@ export function LiveFeedCanvas() {
       {/* Cam 2 — only shown when backend confirms it's streaming */}
       {cam2Active && (
         <>
-          <div className="w-px bg-zinc-800 flex-shrink-0" />
+          <div className="w-px shrink-0 bg-zinc-700/80" />
           <CameraPane
             src={STREAM_URL_2}
-            label="CAM 2"
+            label="Cam 2"
             entities={cam2Entities}
             frameWidth={cam2FrameWidth}
             frameHeight={cam2FrameHeight}
+            frameSeq={frameSeq}
             nightMode={nightMode}
             pipelineActive={cam2Active}
           />

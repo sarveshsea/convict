@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+import sys
 from typing import Optional
 
 import cv2
@@ -184,9 +185,7 @@ class CameraCapture:
         inaccessible on some macOS versions).
         Returns True if the camera opened successfully.
         """
-        cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_AVFOUNDATION)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(self._settings.camera_index)
+        cap = self._open_capture(self._settings.camera_index)
         if not cap.isOpened():
             return False
         self._preopen_cap = cap
@@ -230,36 +229,56 @@ class CameraCapture:
             self._cap.set(cv2.CAP_PROP_GAIN, gain)
 
     def _run(self) -> None:
-        if self._preopen_cap is not None and self._preopen_cap.isOpened():
-            cap = self._preopen_cap
-            self._preopen_cap = None
-        else:
-            cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_AVFOUNDATION)
-            if not cap.isOpened():
-                # Fallback: try without explicit backend
-                cap = cv2.VideoCapture(self._settings.camera_index)
-            if not cap.isOpened():
-                self._active = False
-                return
+        def _configure(c: cv2.VideoCapture) -> None:
+            c.set(cv2.CAP_PROP_FRAME_WIDTH,  self._settings.capture_width)
+            c.set(cv2.CAP_PROP_FRAME_HEIGHT, self._settings.capture_height)
+            c.set(cv2.CAP_PROP_FPS,          30)
+            c.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+            # Disable auto white balance — we correct in software per frame
+            c.set(cv2.CAP_PROP_AUTO_WB, 0)
+            # Prefer MJPEG on USB webcams to reduce bus bandwidth usage.
+            c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self._settings.capture_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._settings.capture_height)
-        cap.set(cv2.CAP_PROP_FPS,          30)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
-        # Disable auto white balance — we correct in software per frame
-        cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+        def _open_or_none() -> cv2.VideoCapture | None:
+            if self._preopen_cap is not None and self._preopen_cap.isOpened():
+                c = self._preopen_cap
+                self._preopen_cap = None
+            else:
+                c = self._open_capture(self._settings.camera_index)
+            if not c.isOpened():
+                return None
+            _configure(c)
+            # Warm-up burst before reads.
+            for _ in range(10):
+                c.grab()
+                time.sleep(0.03)
+            return c
+
+        cap = _open_or_none()
+        if cap is None:
+            self._active = False
+            return
         self._cap = cap
 
-        # macOS AVFoundation needs a warm-up burst before frames are ready
-        for _ in range(10):
-            cap.grab()
-            time.sleep(0.05)
-
+        consecutive_failures = 0
         while not self._stop.is_set():
             ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.05)
+            if not ret or frame is None:
+                consecutive_failures += 1
+                # Camera streams can intermittently stall on Windows; reopen proactively.
+                if consecutive_failures >= 30:
+                    cap.release()
+                    time.sleep(0.2)
+                    cap = _open_or_none()
+                    self._cap = cap
+                    consecutive_failures = 0
+                    if cap is None:
+                        time.sleep(0.5)
+                else:
+                    time.sleep(0.03)
                 continue
+
+            consecutive_failures = 0
             self._loop.call_soon_threadsafe(self._try_put, frame)
 
         cap.release()
@@ -270,3 +289,26 @@ class CameraCapture:
             self._queue.put_nowait(frame)
         except asyncio.QueueFull:
             pass  # intentional drop
+
+    def _open_capture(self, camera_index: int) -> cv2.VideoCapture:
+        """
+        Pick a platform-appropriate backend before generic fallback.
+        - Windows: DirectShow is usually the most reliable for USB webcams.
+        - macOS:   AVFoundation is preferred.
+        - Linux:   V4L2 is preferred.
+        """
+        backend_candidates: list[int] = []
+        if sys.platform.startswith("win"):
+            backend_candidates = [cv2.CAP_DSHOW, cv2.CAP_MSMF]
+        elif sys.platform == "darwin":
+            backend_candidates = [cv2.CAP_AVFOUNDATION]
+        elif sys.platform.startswith("linux"):
+            backend_candidates = [cv2.CAP_V4L2]
+
+        for backend in backend_candidates:
+            cap = cv2.VideoCapture(camera_index, backend)
+            if cap.isOpened():
+                return cap
+            cap.release()
+
+        return cv2.VideoCapture(camera_index)
