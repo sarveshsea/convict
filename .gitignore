@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.egg
+
+# Data — runtime files, not source
+backend/data/
+backend/*.pt
+backend/=*
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# Backend env
+backend/.env.local
+backend/.env
+
+# Misc
+.DS_Store
+*.log
+.memoire/
