@@ -451,7 +451,7 @@ class PipelineOrchestrator:
             capture_height = settings.capture_height
 
         log.info("Starting camera 2 detection pipeline at index %d", settings.camera_index_2)
-        cam2      = CameraCapture(_Cam2Cfg(), loop, q2)
+        cam2 = CameraCapture(_Cam2Cfg(), loop, q2)
         detector2 = BackgroundSubtractorDetector(settings)
         tracker2  = FishTracker(settings)
         tracker2.reset()

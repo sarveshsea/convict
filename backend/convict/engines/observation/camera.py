@@ -174,6 +174,23 @@ class CameraCapture:
         self._thread: threading.Thread | None = None
         self._active = False
         self._cap: cv2.VideoCapture | None = None
+        self._preopen_cap: cv2.VideoCapture | None = None  # pre-opened by caller
+
+    def preopen(self) -> bool:
+        """
+        Open the camera device in the calling thread NOW, before start() is called.
+        Call this before any other camera's start() to avoid macOS AVFoundation
+        index remapping (once one camera session starts, other indices become
+        inaccessible on some macOS versions).
+        Returns True if the camera opened successfully.
+        """
+        cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_AVFOUNDATION)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(self._settings.camera_index)
+        if not cap.isOpened():
+            return False
+        self._preopen_cap = cap
+        return True
 
     def start(self) -> None:
         self._stop.clear()
@@ -202,8 +219,8 @@ class CameraCapture:
         """
         if self._cap is None:
             return
-        exp  = self._settings.night_exposure if night else self._settings.day_exposure
-        gain = self._settings.night_gain     if night else self._settings.day_gain
+        exp  = getattr(self._settings, "night_exposure" if night else "day_exposure", -1.0)
+        gain = getattr(self._settings, "night_gain"     if night else "day_gain",     -1.0)
         if exp != -1.0:
             self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # manual mode
             self._cap.set(cv2.CAP_PROP_EXPOSURE, exp)
@@ -213,13 +230,17 @@ class CameraCapture:
             self._cap.set(cv2.CAP_PROP_GAIN, gain)
 
     def _run(self) -> None:
-        cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_AVFOUNDATION)
-        if not cap.isOpened():
-            # Fallback: try without explicit backend
-            cap = cv2.VideoCapture(self._settings.camera_index)
-        if not cap.isOpened():
-            self._active = False
-            return
+        if self._preopen_cap is not None and self._preopen_cap.isOpened():
+            cap = self._preopen_cap
+            self._preopen_cap = None
+        else:
+            cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_AVFOUNDATION)
+            if not cap.isOpened():
+                # Fallback: try without explicit backend
+                cap = cv2.VideoCapture(self._settings.camera_index)
+            if not cap.isOpened():
+                self._active = False
+                return
 
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self._settings.capture_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._settings.capture_height)

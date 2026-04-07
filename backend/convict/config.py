@@ -1,6 +1,6 @@
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
