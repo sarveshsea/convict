@@ -1,0 +1,11 @@
+.env.local
+data/convict.db
+data/convict.db-shm
+data/convict.db-wal
+data/models/*.pt
+data/models/*.onnx
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
