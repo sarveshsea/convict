@@ -1,4 +1,5 @@
 "use client"
+import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { STREAM_URL, STREAM_URL_2, fishSnapshotUrl } from "@/lib/constants"
 import { useObservationStore } from "@/store/observationStore"
@@ -208,8 +209,8 @@ function FishThumbnailStrip({
       if (!prev || conf > prev.conf) best.set(fid, { fishId: fid, label, conf })
     }
     return Array.from(best.values())
-      .sort((a, b) => a.conf - b.conf)
-      .slice(-6)
+      .sort((a, b) => b.conf - a.conf)
+      .slice(0, 4)   // max 4 thumbnails — keeps strip compact
   }, [entities])
 
   if (items.length === 0) return null
@@ -236,8 +237,9 @@ function FishThumb({
 }) {
   const [imgOk, setImgOk] = useState(true)
   return (
-    <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/12 bg-zinc-950/85 py-1.5 pl-1.5 pr-2.5 shadow-xl shadow-black/50 ring-1 ring-white/8 backdrop-blur-md">
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-zinc-800 ring-1 ring-white/10">
+    <Link href={`/dashboard/fish/${fishId}`}
+      className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/12 bg-zinc-950/85 py-1.5 pl-1.5 pr-2.5 shadow-xl shadow-black/50 ring-1 ring-white/8 backdrop-blur-md hover:bg-zinc-900/90 transition-colors">
+      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-zinc-800 ring-1 ring-white/10">
         {imgOk ? (
           <img
             src={fishSnapshotUrl(fishId, frameSeq)}
@@ -256,7 +258,7 @@ function FishThumb({
         <p className="truncate text-[11px] font-semibold leading-tight text-zinc-100">{label}</p>
         <p className="font-mono text-[10px] tabular-nums text-emerald-400/90">{(conf * 100).toFixed(0)}% match</p>
       </div>
-    </div>
+    </Link>
   )
 }
 
