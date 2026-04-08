@@ -15,36 +15,51 @@ function HalftoneCanvas() {
     const ctx = canvas.getContext("2d")!
     const dpr = window.devicePixelRatio || 1
     let W = 0, H = 0, raf = 0, t = 0
-    const GAP = 20
+    const GAP = 18
+
     const resize = () => {
-      W = canvas.offsetWidth; H = canvas.offsetHeight
-      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr)
+      const w = canvas.offsetWidth
+      const h = canvas.offsetHeight
+      if (w < 1 || h < 1) return
+      W = w; H = h
+      canvas.width  = Math.round(W * dpr)
+      canvas.height = Math.round(H * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
+
     const draw = () => {
+      if (W < 1) { resize(); raf = requestAnimationFrame(draw); return }
       ctx.fillStyle = "#09090f"
       ctx.fillRect(0, 0, W, H)
-      t += 0.005
+      t += 0.022   // clearly visible movement speed
+
       const cols = Math.ceil(W / GAP) + 1
       const rows = Math.ceil(H / GAP) + 1
+      const MAX_R = (GAP / 2) * 0.9   // max dot radius = ~8px
+
       for (let c = 0; c < cols; c++) {
         for (let r = 0; r < rows; r++) {
           const x = c * GAP
           const y = r * GAP
-          const v = Math.sin(c * 0.38 + t) * Math.cos(r * 0.38 + t * 0.75)
-                  + Math.sin((c - r) * 0.22 + t * 1.15) * 0.55
-          const n = (v + 1.55) / 3.1
-          if (n < 0.06) continue
+          // Three overlapping waves — creates organic blobs
+          const v = Math.sin(c * 0.32 + t)         * Math.cos(r * 0.32 + t * 0.65)
+                  + Math.sin((c + r) * 0.18 - t * 0.85) * 0.9
+                  + Math.cos(c * 0.12 - r * 0.18 + t * 1.4) * 0.5
+          // Normalize → [0,1], square for high contrast (small stays small, big gets big)
+          const raw = Math.max(0, Math.min(1, (v + 2.4) / 4.8))
+          const n   = raw * raw
+          if (n < 0.03) continue
           ctx.beginPath()
-          ctx.arc(x, y, Math.max(0.3, n * 4.8), 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(228,228,231,${(n * 0.5).toFixed(2)})`
+          ctx.arc(x, y, n * MAX_R, 0, Math.PI * 2)
+          ctx.fillStyle = `rgba(240,240,248,${(n * 0.85).toFixed(2)})`
           ctx.fill()
         }
       }
       raf = requestAnimationFrame(draw)
     }
+
     resize()
-    draw()
+    raf = requestAnimationFrame(draw)
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
     return () => { cancelAnimationFrame(raf); ro.disconnect() }
@@ -63,22 +78,22 @@ function OfflineCard() {
     { label: "MODE",   value: "STANDBY" },
   ]
   return (
-    <div className="absolute right-10 top-1/2 -translate-y-1/2 w-52 bg-background/50 border border-border/25 backdrop-blur-sm p-5 space-y-2.5">
+    <div className="absolute right-10 top-1/2 -translate-y-1/2 w-60 bg-black/70 border border-white/10 backdrop-blur-md p-6 space-y-3">
       {rows.map(({ label, value }) => (
-        <div key={label} className="flex items-center gap-2.5">
-          <span className="text-label text-muted-foreground/40 w-14 shrink-0">{label}</span>
-          <span className="text-label text-muted-foreground/30">›</span>
-          <span className="text-label text-foreground/55 tracking-widest">{value}</span>
+        <div key={label} className="flex items-center gap-3">
+          <span className="text-label text-white/35 w-14 shrink-0">{label}</span>
+          <span className="text-label text-white/25">›</span>
+          <span className="text-label text-white font-medium tracking-widest truncate">{value}</span>
         </div>
       ))}
-      <div className="flex gap-[2px] pt-2">
-        {Array.from({ length: 46 }).map((_, i) => (
-          <div key={i} className="h-px bg-border/20 flex-1" />
+      <div className="flex gap-[2px] pt-1">
+        {Array.from({ length: 48 }).map((_, i) => (
+          <div key={i} className="h-px bg-white/15 flex-1" />
         ))}
       </div>
       <div className="flex justify-between items-center">
-        <span className="text-label text-muted-foreground/20 tracking-widest">CONVICT</span>
-        <span className="text-label text-muted-foreground/20">WAITING</span>
+        <span className="text-label text-white/25 tracking-widest">CONVICT</span>
+        <span className="text-label text-white/25">WAITING</span>
       </div>
     </div>
   )
@@ -95,9 +110,9 @@ function ConnectingBar() {
   return (
     <div className="flex flex-col items-center gap-4 pointer-events-none">
       <div className="flex items-center gap-4">
-        <span className="text-label text-muted-foreground/50 w-16 shrink-0">STATUS</span>
-        <span className="text-label text-muted-foreground/30">›</span>
-        <span className="text-label text-primary/60 tracking-widest">CONNECTING</span>
+        <span className="text-label text-white/40 w-16 shrink-0">STATUS</span>
+        <span className="text-label text-white/25">›</span>
+        <span className="text-label text-white tracking-widest">CONNECTING</span>
       </div>
       <div className="flex gap-[3px]">
         {Array.from({ length: 48 }).map((_, i) => (
@@ -107,16 +122,16 @@ function ConnectingBar() {
             style={{
               height: 14,
               background: i <= tick
-                ? `rgba(96,165,250,${0.15 + (i / 48) * 0.6})`
-                : "rgba(63,63,70,0.3)",
+                ? `rgba(255,255,255,${0.15 + (i / 48) * 0.7})`
+                : "rgba(255,255,255,0.08)",
             }}
           />
         ))}
       </div>
       <div className="flex items-center gap-4">
-        <span className="text-label text-muted-foreground/50 w-16 shrink-0">CAMERA</span>
-        <span className="text-label text-muted-foreground/30">›</span>
-        <span className="text-label text-muted-foreground/40 tracking-widest">INITIALIZING</span>
+        <span className="text-label text-white/40 w-16 shrink-0">CAMERA</span>
+        <span className="text-label text-white/25">›</span>
+        <span className="text-label text-white/70 tracking-widest">INITIALIZING</span>
       </div>
     </div>
   )
