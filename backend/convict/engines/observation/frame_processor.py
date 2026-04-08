@@ -309,15 +309,7 @@ class FrameProcessor:
             cv2.putText(frame, label, (x1, max(y1 - 6, 14)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.48, colour, 1, cv2.LINE_AA)
 
-            # Trail — gradient from dim (old) to bright (recent)
-            trail = e["trail"]
-            n     = len(trail)
-            for j in range(1, n):
-                alpha = j / n
-                tc = (int(colour[0] * alpha), int(colour[1] * alpha), int(colour[2] * alpha))
-                p1 = (int(trail[j - 1][0]), int(trail[j - 1][1]))
-                p2 = (int(trail[j][0]),     int(trail[j][1]))
-                cv2.line(frame, p1, p2, tc, 2, cv2.LINE_AA)
+            # Trails rendered in frontend canvas overlay — skip here to avoid doubling
 
         ret, buf = cv2.imencode(
             ".jpg", frame,
@@ -331,27 +323,74 @@ class FrameProcessor:
 
     @staticmethod
     def _save_snapshots(frame: np.ndarray, entities: list[dict]) -> None:
-        """Save a cropped JPEG for each confidently-identified fish (max once per 60s)."""
+        """
+        Save cropped JPEGs for each confidently-identified fish.
+
+        - Display snapshot: snapshots/{uuid}.jpg          — debounced 30s, shown in UI
+        - Training crops:   snapshots/training/{uuid}/{ms}.jpg + YOLO .txt — up to 20 per fish
+        """
         import time
-        snap_dir = settings.db_path.parent / "snapshots"
+        snap_dir  = settings.db_path.parent / "snapshots"
+        train_dir = snap_dir / "training"
         snap_dir.mkdir(parents=True, exist_ok=True)
         now = time.time()
         h, w = frame.shape[:2]
+
         for e in entities:
-            ident = e["identity"]
-            if not ident["fish_id"] or ident["confidence"] < 0.42:
+            ident   = e["identity"]
+            fish_id = ident.get("fish_id")
+            if not fish_id or ident.get("confidence", 0) < 0.50:
                 continue
-            snap_path = snap_dir / f"{ident['fish_id']}.jpg"
-            if snap_path.exists() and (now - snap_path.stat().st_mtime) < 60:
-                continue
+
             x1, y1, x2, y2 = [int(v) for v in e["bbox"]]
-            pad_x = max(8, int((x2 - x1) * 0.12))
-            pad_y = max(8, int((y2 - y1) * 0.12))
-            crop = frame[max(0, y1 - pad_y):min(h, y2 + pad_y),
-                         max(0, x1 - pad_x):min(w, x2 + pad_x)]
+            pad_x = max(12, int((x2 - x1) * 0.18))
+            pad_y = max(12, int((y2 - y1) * 0.18))
+
+            # Actual crop bounds (clamped to frame)
+            cy1 = max(0, y1 - pad_y); cy2 = min(h, y2 + pad_y)
+            cx1 = max(0, x1 - pad_x); cx2 = min(w, x2 + pad_x)
+            crop = frame[cy1:cy2, cx1:cx2]
             if crop.size == 0:
                 continue
-            cv2.imwrite(str(snap_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 88])
+
+            # Skip blurry / motion-blurred crops (Laplacian variance threshold)
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            if cv2.Laplacian(gray, cv2.CV_64F).var() < 80:
+                continue
+
+            # ── Display snapshot (debounced 30s) ──────────────────────────────
+            snap_path = snap_dir / f"{fish_id}.jpg"
+            if not snap_path.exists() or (now - snap_path.stat().st_mtime) >= 30:
+                cv2.imwrite(str(snap_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 93])
+
+            # ── Training crops (one per 10s, max 20 per fish) ─────────────────
+            fish_train_dir = train_dir / str(fish_id)
+            fish_train_dir.mkdir(parents=True, exist_ok=True)
+
+            existing = sorted(fish_train_dir.glob("*.jpg"))
+            if existing and now - existing[-1].stat().st_mtime < 10:
+                continue   # rate-limit
+
+            ts = int(now * 1000)
+            cv2.imwrite(str(fish_train_dir / f"{ts}.jpg"), crop,
+                        [cv2.IMWRITE_JPEG_QUALITY, 93])
+
+            # YOLO annotation (class 0, fish centred in padded crop)
+            crop_w = cx2 - cx1; crop_h = cy2 - cy1
+            ann_cx = ((x1 + x2) / 2 - cx1) / crop_w
+            ann_cy = ((y1 + y2) / 2 - cy1) / crop_h
+            ann_bw = (x2 - x1) / crop_w
+            ann_bh = (y2 - y1) / crop_h
+            (fish_train_dir / f"{ts}.txt").write_text(
+                f"0 {ann_cx:.4f} {ann_cy:.4f} {ann_bw:.4f} {ann_bh:.4f}\n"
+            )
+
+            # Circular buffer — keep latest 20
+            all_crops = sorted(fish_train_dir.glob("*.jpg"))
+            if len(all_crops) > 20:
+                for old in all_crops[:-20]:
+                    old.unlink(missing_ok=True)
+                    old.with_suffix(".txt").unlink(missing_ok=True)
 
     @property
     def identity_health(self) -> float:
