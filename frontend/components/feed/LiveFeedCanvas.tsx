@@ -27,34 +27,58 @@ function HalftoneCanvas() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
 
+    // ── Value noise (no sine waves, no periodic pattern) ──────────────────
+    const fract  = (x: number) => x - Math.floor(x)
+    const smooth = (x: number) => x * x * (3 - 2 * x)
+    const mix    = (a: number, b: number, t: number) => a + (b - a) * t
+
+    function hash(x: number, y: number): number {
+      const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
+      return fract(Math.abs(v))
+    }
+    function noise(x: number, y: number): number {
+      const ix = Math.floor(x), iy = Math.floor(y)
+      const fx = x - ix,        fy = y - iy
+      const ux = smooth(fx),    uy = smooth(fy)
+      return mix(
+        mix(hash(ix, iy),   hash(ix+1, iy),   ux),
+        mix(hash(ix, iy+1), hash(ix+1, iy+1), ux),
+        uy,
+      )
+    }
+    // FBM — 3 octaves of value noise
+    function fbm(x: number, y: number): number {
+      return noise(x, y) * 0.57
+           + noise(x * 2.07, y * 2.07) * 0.28
+           + noise(x * 4.17, y * 4.17) * 0.15
+    }
+
     const draw = () => {
       if (W < 1) { resize(); raf = requestAnimationFrame(draw); return }
       ctx.fillStyle = "#09090f"
       ctx.fillRect(0, 0, W, H)
-      t += 0.022
+      t += 0.014
 
-      const cols = Math.ceil(W / GAP) + 1
-      const rows = Math.ceil(H / GAP) + 1
-      const MAX_R = (GAP / 2) * 0.82   // ~4.5px max
+      const cols  = Math.ceil(W / GAP) + 1
+      const rows  = Math.ceil(H / GAP) + 1
+      const MAX_R = (GAP / 2) * 0.82
+      const SC    = 0.048   // grid → noise coordinate scale
 
       for (let c = 0; c < cols; c++) {
         for (let r = 0; r < rows; r++) {
           const x = c * GAP
           const y = r * GAP
-          // Stable per-cell phase offset — breaks grid regularity
-          const ph = (Math.sin(c * 127.1 + r * 311.7) * 43758.5453) % (Math.PI * 2)
-          // Many waves at irrational frequency ratios — never visibly repeating
-          const v = Math.sin(c * 0.31 + t * 1.00 + ph * 0.4)
-                  * Math.cos(r * 0.29 + t * 0.71 + ph * 0.3)
-                  + Math.sin(c * 0.17 + r * 0.23 + t * 1.37 + ph * 0.6) * 0.8
-                  + Math.cos(c * 0.41 - r * 0.37 + t * 0.83 + ph * 0.2) * 0.55
-                  + Math.sin(c * 0.13 + r * 0.19 - t * 1.61 + ph * 0.5) * 0.35
-          const raw = Math.max(0, Math.min(1, (v + 2.7) / 5.4))
-          const n   = raw * raw
-          if (n < 0.04) continue
+          // Domain warp: sample coordinates are bent by a second FBM
+          // → completely destroys any grid/wave regularity
+          const wx = fbm(c * SC + t * 0.21,       r * SC + t * 0.13      ) * 2.8
+          const wy = fbm(c * SC - t * 0.17 + 5.3, r * SC + t * 0.09 + 1.9) * 2.8
+          const n  = fbm(c * SC + wx + t * 0.08,  r * SC + wy - t * 0.06 )
+          // Cubic curve: small values vanish, bright values pop
+          const k  = n * n * n
+          if (k < 0.04) continue
           ctx.beginPath()
-          ctx.arc(x, y, n * MAX_R, 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(240,240,248,${(n * 0.85).toFixed(2)})`
+          ctx.arc(x, y, k * MAX_R, 0, Math.PI * 2)
+          ctx.fillStyle = `rgba(240,240,248,${(k * 0.9).toFixed(2)})`
           ctx.fill()
         }
       }
