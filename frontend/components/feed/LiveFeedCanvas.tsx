@@ -10,6 +10,28 @@ function confidenceColor(c: number): string {
   return "#f43f5e"
 }
 
+/** Derive a stable, visually-distinct hue from a fish UUID. */
+function fishHue(fishId: string): number {
+  let h = 0
+  for (let i = 0; i < fishId.length; i++) {
+    h = fishId.charCodeAt(i) + ((h << 5) - h)
+  }
+  // Avoid the red-ish band (330-30°) which clashes with error states
+  const raw = Math.abs(h) % 300
+  return raw < 30 ? raw + 30 : raw
+}
+
+/** Per-fish identity color (stable hue) or confidence fallback when unidentified. */
+function entityColor(e: LiveEntity): string {
+  if (e.identity?.fish_id) {
+    const hue = fishHue(e.identity.fish_id)
+    const conf = e.identity.confidence
+    const l = conf >= 0.7 ? 68 : conf >= 0.4 ? 62 : 56
+    return `hsl(${hue}, 80%, ${l}%)`
+  }
+  return confidenceColor(0)  // blue-grey for unidentified
+}
+
 /** Extract the common name from "Binomial name (Common Name)" or return first two words */
 function extractCommonName(species: string): string {
   const m = species.match(/\(([^)]+)\)/)
@@ -52,16 +74,20 @@ function drawEntity(ctx: CanvasRenderingContext2D, e: LiveEntity, lb: Letterbox)
   const ry2 = Math.max(0, Math.min(ch, e.bbox[3] * scaleY + offY))
   if (rx2 - rx1 < 2 || ry2 - ry1 < 2) return
 
+  const color    = entityColor(e)
   const chipMeta = getChipState(e.identity)
-  const color = chipMeta.scanning ? "#52525b" : chipMeta.color
-  const bw    = rx2 - rx1
-  const bh    = ry2 - ry1
-  const clen  = Math.max(8, Math.min(bw * 0.2, bh * 0.2, 20))
+  const bw = rx2 - rx1
+  const bh = ry2 - ry1
+  const clen = Math.max(8, Math.min(bw * 0.2, bh * 0.2, 20))
 
+  // ── Corner brackets ────────────────────────────────────────────────────────
+  ctx.save()
   ctx.strokeStyle = color
   ctx.lineWidth   = 2
-  ctx.globalAlpha = 0.95
+  ctx.globalAlpha = 0.92
   ctx.lineCap     = "square"
+  ctx.shadowColor = color
+  ctx.shadowBlur  = 6
   for (const [px, py, sx, sy] of [
     [rx1, ry1,  1,  1], [rx2, ry1, -1,  1],
     [rx1, ry2,  1, -1], [rx2, ry2, -1, -1],
@@ -72,58 +98,86 @@ function drawEntity(ctx: CanvasRenderingContext2D, e: LiveEntity, lb: Letterbox)
     ctx.lineTo(px, py + sy * clen)
     ctx.stroke()
   }
+  ctx.restore()
 
+  // ── Trail — tapering width + opacity gradient, glow at head ────────────────
   if (e.trail.length > 1) {
     const n = e.trail.length
+    ctx.save()
+    ctx.lineCap    = "round"
+    ctx.lineJoin   = "round"
+    ctx.strokeStyle = color
     for (let j = 1; j < n; j++) {
-      const a   = (j / n) * 0.65
-      const px0 = Math.max(0, Math.min(cw, e.trail[j - 1][0] * scaleX + offX))
-      const py0 = Math.max(0, Math.min(ch, e.trail[j - 1][1] * scaleY + offY))
-      const px1 = Math.max(0, Math.min(cw, e.trail[j][0] * scaleX + offX))
-      const py1 = Math.max(0, Math.min(ch, e.trail[j][1] * scaleY + offY))
+      const t    = j / n                         // 0 = oldest, 1 = newest
+      const px0  = e.trail[j - 1][0] * scaleX + offX
+      const py0  = e.trail[j - 1][1] * scaleY + offY
+      const px1  = e.trail[j][0] * scaleX + offX
+      const py1  = e.trail[j][1] * scaleY + offY
       ctx.beginPath()
-      ctx.strokeStyle  = color
-      ctx.lineWidth    = 1.5
-      ctx.globalAlpha  = a
+      ctx.lineWidth    = 0.5 + t * 2.5           // thin at tail, thick at head
+      ctx.globalAlpha  = t * 0.70
+      if (j === n - 1) { ctx.shadowColor = color; ctx.shadowBlur = 8 }
+      else              { ctx.shadowBlur = 0 }
       ctx.moveTo(px0, py0)
       ctx.lineTo(px1, py1)
       ctx.stroke()
     }
+    ctx.restore()
   }
 
-  ctx.beginPath()
-  ctx.arc((rx1 + rx2) / 2, (ry1 + ry2) / 2, 3, 0, Math.PI * 2)
-  ctx.fillStyle   = color
-  ctx.globalAlpha = 0.85
-  ctx.fill()
+  // ── Head dot + confidence ring ──────────────────────────────────────────────
+  const hx = (rx1 + rx2) / 2
+  const hy = (ry1 + ry2) / 2
 
+  ctx.save()
+  ctx.shadowColor = color
+  ctx.shadowBlur  = 10
+  ctx.beginPath()
+  ctx.arc(hx, hy, 4, 0, Math.PI * 2)
+  ctx.fillStyle   = color
+  ctx.globalAlpha = 0.92
+  ctx.fill()
+  ctx.restore()
+
+  if (e.identity?.fish_id) {
+    const conf = e.identity.confidence
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(hx, hy, 9, -Math.PI / 2, -Math.PI / 2 + conf * Math.PI * 2)
+    ctx.strokeStyle = color
+    ctx.lineWidth   = 1.5
+    ctx.globalAlpha = 0.55
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // ── Label chip ─────────────────────────────────────────────────────────────
   ctx.globalAlpha = 1
-  const chip = getChipState(e.identity)
-  const conf = e.identity?.confidence ?? 0
+  const conf    = e.identity?.confidence ?? 0
   const confStr = e.identity?.fish_id ? ` ${(conf * 100).toFixed(0)}%` : ""
 
-  if (chip.scanning) {
-    const phase = Math.floor(Date.now() / 350) % 3
+  if (chipMeta.scanning) {
+    const phase    = Math.floor(Date.now() / 350) % 3
     const dotLabel = "identifying" + ".".repeat(phase + 1)
     ctx.font = "10px 'Geist Mono', monospace"
     const tw    = ctx.measureText(dotLabel).width
     const chipX = rx1
     const chipY = Math.max(0, ry1 - 18)
-    ctx.fillStyle = "rgba(9,9,11,0.70)"
+    ctx.fillStyle   = "rgba(9,9,11,0.70)"
     ctx.fillRect(chipX, chipY, tw + 10, 16)
-    ctx.fillStyle = chip.color
+    ctx.fillStyle   = chipMeta.color
     ctx.globalAlpha = 0.55 + 0.45 * Math.abs(Math.sin(Date.now() / 600))
     ctx.fillText(dotLabel, chipX + 5, chipY + 11)
     ctx.globalAlpha = 1
   } else {
-    const label = `${chip.text}${confStr}`
+    const label = `${chipMeta.text}${confStr}`
     ctx.font = "bold 11px 'Geist Mono', monospace"
     const tw    = ctx.measureText(label).width
     const chipX = rx1
     const chipY = Math.max(0, ry1 - 18)
     ctx.fillStyle = "rgba(9,9,11,0.82)"
     ctx.fillRect(chipX, chipY, tw + 10, 16)
-    ctx.fillStyle = chip.color
+    ctx.fillStyle = color
     ctx.fillText(label, chipX + 5, chipY + 11)
   }
 }
