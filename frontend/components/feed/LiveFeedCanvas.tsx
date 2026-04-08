@@ -15,7 +15,7 @@ function HalftoneCanvas() {
     const ctx = canvas.getContext("2d")!
     const dpr = window.devicePixelRatio || 1
     let W = 0, H = 0, raf = 0, t = 0
-    const GAP = 18
+    const GAP = 11
 
     const resize = () => {
       const w = canvas.offsetWidth
@@ -31,24 +31,22 @@ function HalftoneCanvas() {
       if (W < 1) { resize(); raf = requestAnimationFrame(draw); return }
       ctx.fillStyle = "#09090f"
       ctx.fillRect(0, 0, W, H)
-      t += 0.022   // clearly visible movement speed
+      t += 0.022
 
       const cols = Math.ceil(W / GAP) + 1
       const rows = Math.ceil(H / GAP) + 1
-      const MAX_R = (GAP / 2) * 0.9   // max dot radius = ~8px
+      const MAX_R = (GAP / 2) * 0.82   // ~4.5px max
 
       for (let c = 0; c < cols; c++) {
         for (let r = 0; r < rows; r++) {
           const x = c * GAP
           const y = r * GAP
-          // Three overlapping waves — creates organic blobs
-          const v = Math.sin(c * 0.32 + t)         * Math.cos(r * 0.32 + t * 0.65)
+          const v = Math.sin(c * 0.32 + t)             * Math.cos(r * 0.32 + t * 0.65)
                   + Math.sin((c + r) * 0.18 - t * 0.85) * 0.9
                   + Math.cos(c * 0.12 - r * 0.18 + t * 1.4) * 0.5
-          // Normalize → [0,1], square for high contrast (small stays small, big gets big)
           const raw = Math.max(0, Math.min(1, (v + 2.4) / 4.8))
           const n   = raw * raw
-          if (n < 0.03) continue
+          if (n < 0.04) continue
           ctx.beginPath()
           ctx.arc(x, y, n * MAX_R, 0, Math.PI * 2)
           ctx.fillStyle = `rgba(240,240,248,${(n * 0.85).toFixed(2)})`
