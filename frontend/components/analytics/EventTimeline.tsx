@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { listEvents } from "@/lib/api"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useTankStore } from "@/store/tankStore"
@@ -192,6 +193,7 @@ function drawTimeline(
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function EventTimeline() {
+  const router       = useRouter()
   const fish         = useTankStore((s) => s.fish).filter((f) => f.is_active)
   const liveAnomalies = usePredictionStore((s) => s.anomalies)
 
@@ -284,6 +286,13 @@ export function EventTimeline() {
     else     setTooltip(null)
   }, [])
 
+  const onClick = useCallback(() => {
+    const hit = hoveredRef.current
+    if (!hit) return
+    const primary = hit.event.involved_fish?.[0]?.fish_id
+    if (primary) router.push(`/dashboard/fish/${primary}`)
+  }, [router])
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Controls */}
@@ -330,6 +339,7 @@ export function EventTimeline() {
               setHovered(null)
               setTooltip(null)
             }}
+            onClick={onClick}
             style={{ cursor: hovered ? "pointer" : "default" }}
           />
         )}

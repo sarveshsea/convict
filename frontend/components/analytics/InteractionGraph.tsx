@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { listEvents } from "@/lib/api"
 import { useTankStore } from "@/store/tankStore"
 import { TEMP_COLOR } from "@/lib/constants"
@@ -274,6 +275,7 @@ function Legend() {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function InteractionGraph() {
+  const router        = useRouter()
   const fish          = useTankStore((s) => s.fish).filter((f) => f.is_active)
   const canvasRef     = useRef<HTMLCanvasElement>(null)
   const containerRef  = useRef<HTMLDivElement>(null)
@@ -356,6 +358,13 @@ export function InteractionGraph() {
     setHovered(hit)
   }, [])
 
+  const onClick = useCallback(() => {
+    const idx = hoveredRef.current
+    if (idx === null) return
+    const node = nodesRef.current[idx]
+    if (node?.id) router.push(`/dashboard/fish/${node.id}`)
+  }, [router])
+
   const hoveredNode = hovered !== null ? nodesRef.current[hovered] : null
 
   return (
@@ -365,6 +374,7 @@ export function InteractionGraph() {
         className="absolute inset-0 w-full h-full"
         onMouseMove={onMouseMove}
         onMouseLeave={() => { hoveredRef.current = null; setHovered(null) }}
+        onClick={onClick}
         style={{ cursor: hovered !== null ? "pointer" : "default" }}
       />
 
