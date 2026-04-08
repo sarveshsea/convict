@@ -814,7 +814,7 @@ export function LeftPanel() {
   }
 
   return (
-    <aside className="w-[440px] shrink-0 flex flex-col border-r border-border/40 bg-background overflow-hidden pointer-events-auto">
+    <aside className="w-1/2 shrink-0 flex flex-col border-r border-border/40 bg-background overflow-hidden pointer-events-auto">
       <div className="px-2 border-b border-border/40 shrink-0 flex items-center justify-end h-8">
         <button onClick={() => setCollapsed(true)} className="text-muted-foreground/50 hover:text-foreground transition-colors p-1 rounded">
           <ChevronLeft size={13} />
