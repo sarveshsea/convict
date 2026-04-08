@@ -102,7 +102,14 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
   const [deleting, setDeleting]         = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [imgFailed, setImgFailed]       = useState(false)
+  const [imgTick,   setImgTick]         = useState(0)
   const sp = speciesLabel(fish.species)
+
+  // Retry snapshot every 30s so newly-identified fish show their photo
+  useEffect(() => {
+    const id = setInterval(() => { setImgFailed(false); setImgTick((t) => t + 1) }, 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   if (deleting) {
     return <div className="h-14 mx-3 my-1.5 rounded animate-pulse bg-muted/40" />
@@ -113,7 +120,7 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
       <Link href={`/dashboard/fish/${fish.uuid}`} className="flex items-center gap-3 px-3 py-2.5 pr-8">
         <div className={`w-10 h-10 rounded shrink-0 bg-muted border border-border/60 overflow-hidden relative flex items-center justify-center ${isTracked ? "ring-1 ring-primary/40" : ""}`}>
           {!imgFailed ? (
-            <img src={fishSnapshotUrl(fish.uuid)} alt="" className="w-full h-full object-cover" onError={() => setImgFailed(true)} />
+            <img src={fishSnapshotUrl(fish.uuid, imgTick)} alt="" className="w-full h-full object-cover" onError={() => setImgFailed(true)} />
           ) : (
             <span className="text-sm font-mono text-muted-foreground select-none">{fish.name.slice(0, 2).toUpperCase()}</span>
           )}
@@ -352,12 +359,22 @@ function ConfigTab() {
 function SnapshotsTab() {
   const fish = useTankStore((s) => s.fish).filter((f) => f.is_active)
   const [failed, setFailed] = useState<Set<string>>(new Set())
+  const [tick,   setTick]   = useState(0)
   const [cols, setCols]     = useState<2 | 3>(() => {
     if (typeof window !== "undefined") {
       return (parseInt(localStorage.getItem("snapshot_cols") ?? "2") as 2 | 3)
     }
     return 2
   })
+
+  // Retry failed images every 30s — snapshots appear gradually after identification
+  useEffect(() => {
+    const id = setInterval(() => {
+      setFailed(new Set())
+      setTick((t) => t + 1)
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   function toggleCols() {
     const next = cols === 2 ? 3 : 2
@@ -386,10 +403,10 @@ function SnapshotsTab() {
                   <div className="aspect-square rounded bg-muted border border-border/60 overflow-hidden relative flex items-center justify-center">
                     {!failed.has(f.uuid) ? (
                       <img
-                        src={fishSnapshotUrl(f.uuid)}
+                        src={fishSnapshotUrl(f.uuid, tick)}
                         alt=""
                         className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
-                        onError={() => failed.has(f.uuid) || setFailed((p) => new Set([...p, f.uuid]))}
+                        onError={() => setFailed((p) => new Set([...p, f.uuid]))}
                       />
                     ) : (
                       <span className="text-sm font-mono text-muted-foreground">{f.name.slice(0, 2).toUpperCase()}</span>
