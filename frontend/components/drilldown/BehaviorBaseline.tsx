@@ -68,7 +68,7 @@ self.onmessage = function(e) {
     }
 
     // Hour labels
-    ctx.font = "8px 'Fira Code', monospace";
+    ctx.font = (8 * (d.dpr || 1)) + "px 'Fira Code', monospace";
     ctx.textAlign = "center";
     var labels = [0, 6, 12, 18, 23];
     for (var li = 0; li < labels.length; li++) {
@@ -213,8 +213,9 @@ export function BehaviorBaseline({ baseline }: Props) {
               canvas: offscreen,
               hours,
               colors: { bg: CANVAS_COLORS.bg, text: CANVAS_COLORS.text },
-              W: rect.width,
-              H: rect.height,
+              W: rect.width * dpr,
+              H: rect.height * dpr,
+              dpr,
               currentHour: new Date().getHours(),
             },
           },

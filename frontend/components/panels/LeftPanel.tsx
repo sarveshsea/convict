@@ -302,6 +302,17 @@ function RosterTab() {
     return [...list].sort((a, b) => a.name.localeCompare(b.name))
   }, [fish, entities, sort, search])
 
+  const groupedBySpecies = useMemo(() => {
+    if (sort !== "species") return null
+    const groups = new Map<string, KnownFish[]>()
+    for (const f of activeFish) {
+      const key = speciesLabel(f.species).muted ? "Unidentified" : speciesLabel(f.species).text
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(f)
+    }
+    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length)
+  }, [activeFish, sort])
+
   const unresolved    = entities.filter((e) => !e.identity?.fish_id)
   const trackedCount  = entities.filter((e) => e.identity?.fish_id).length
 
@@ -336,6 +347,16 @@ function RosterTab() {
       <div className="flex-1 overflow-y-auto scrollbar-thin min-h-0">
         {activeFish.length === 0
           ? <EmptyState message="no fish registered" />
+          : groupedBySpecies
+          ? groupedBySpecies.map(([species, group]) => (
+              <div key={species}>
+                <div className="px-3 py-1 bg-muted/20 border-b border-border/40 flex items-center justify-between sticky top-0 z-10">
+                  <span className="text-label text-muted-foreground">{species}</span>
+                  <span className="text-label text-muted-foreground/50">{group.length}</span>
+                </div>
+                {group.map((f) => <FishRow key={f.uuid} fish={f} entity={entityForFish(f)} />)}
+              </div>
+            ))
           : activeFish.map((f) => <FishRow key={f.uuid} fish={f} entity={entityForFish(f)} />)
         }
 
@@ -367,70 +388,100 @@ function ConfigTab() {
 
 // ─── Snapshots Tab ────────────────────────────────────────────────────────────
 
-function SnapshotsTab() {
-  const fish = useTankStore((s) => s.fish).filter((f) => f.is_active)
-  const [failed, setFailed] = useState<Set<string>>(new Set())
-  const [tick,   setTick]   = useState(0)
-  const [cols, setCols]     = useState<2 | 3>(() => {
-    if (typeof window !== "undefined") {
-      return (parseInt(localStorage.getItem("snapshot_cols") ?? "2") as 2 | 3)
-    }
-    return 2
-  })
-
-  // Retry failed images every 30s — snapshots appear gradually after identification
+function PhotoLightbox({ fish, tick, onClose }: { fish: KnownFish; tick: number; onClose: () => void }) {
+  const sp = speciesLabel(fish.species)
   useEffect(() => {
-    const id = setInterval(() => {
-      setFailed(new Set())
-      setTick((t) => t + 1)
-    }, 30_000)
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+  return (
+    <div
+      className="absolute inset-0 z-50 bg-black/92 backdrop-blur-sm flex flex-col items-center justify-center gap-4 p-6"
+      onClick={onClose}
+    >
+      <div className="relative max-w-xs w-full" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={fishSnapshotUrl(fish.uuid, tick)}
+          alt={fish.name}
+          className="w-full rounded border border-white/10 object-cover"
+        />
+        <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${TEMP_COLOR[fish.temperament] ?? "bg-border"}`} />
+      </div>
+      <div className="text-center space-y-1" onClick={(e) => e.stopPropagation()}>
+        <p className="text-sm font-medium text-white">{fish.name}</p>
+        <p className={`text-caption ${sp.possible ? "text-amber-400" : "text-white/55"}`}>
+          {sp.possible && "~"}{sp.text}
+        </p>
+        <p className="text-label text-white/30">{fish.size_class} · {fish.temperament}</p>
+        <Link
+          href={`/dashboard/fish/${fish.uuid}`}
+          className="block mt-2 text-label text-primary hover:text-primary/80 transition-colors"
+        >
+          view details →
+        </Link>
+      </div>
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 text-white/35 hover:text-white transition-colors text-label px-1.5 py-0.5"
+      >
+        esc
+      </button>
+    </div>
+  )
+}
+
+function SnapshotsTab() {
+  const fish  = useTankStore((s) => s.fish).filter((f) => f.is_active)
+  const [failed,   setFailed]   = useState<Set<string>>(new Set())
+  const [tick,     setTick]     = useState(0)
+  const [selected, setSelected] = useState<KnownFish | null>(null)
+
+  useEffect(() => {
+    const id = setInterval(() => { setFailed(new Set()); setTick((t) => t + 1) }, 30_000)
     return () => clearInterval(id)
   }, [])
 
-  function toggleCols() {
-    const next = cols === 2 ? 3 : 2
-    setCols(next)
-    localStorage.setItem("snapshot_cols", String(next))
-  }
-
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-3 py-1.5 border-b border-border/40 flex items-center justify-between shrink-0">
-        <span className="text-label text-muted-foreground">Snapshots</span>
-        <button
-          onClick={toggleCols}
-          className="text-label text-muted-foreground hover:text-foreground transition-colors border border-border/40 rounded px-1.5 py-0.5"
-        >
-          {cols}×col
-        </button>
+    <div className="flex flex-col h-full relative">
+      <div className="px-3 py-1.5 border-b border-border/40 flex items-center shrink-0">
+        <span className="text-label text-muted-foreground">{fish.length} snapshots</span>
       </div>
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
-        {fish.length === 0
-          ? <EmptyState message="no snapshots yet" />
-          : (
-            <div className={`grid gap-2 ${cols === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-              {fish.map((f) => (
-                <Link key={f.uuid} href={`/dashboard/fish/${f.uuid}`} className="group flex flex-col gap-1">
+      <div className="flex-1 overflow-y-auto scrollbar-thin p-2.5">
+        {fish.length === 0 ? (
+          <EmptyState message="no snapshots yet" />
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {fish.map((f) => {
+              const sp = speciesLabel(f.species)
+              return (
+                <button key={f.uuid} onClick={() => setSelected(f)} className="group flex flex-col gap-1 text-left">
                   <div className="aspect-square rounded bg-muted border border-border/60 overflow-hidden relative flex items-center justify-center">
                     {!failed.has(f.uuid) ? (
                       <img
                         src={fishSnapshotUrl(f.uuid, tick)}
                         alt=""
-                        className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                         onError={() => setFailed((p) => new Set([...p, f.uuid]))}
                       />
                     ) : (
-                      <span className="text-sm font-mono text-muted-foreground">{f.name.slice(0, 2).toUpperCase()}</span>
+                      <span className="text-sm font-mono text-muted-foreground select-none">{f.name.slice(0, 2).toUpperCase()}</span>
                     )}
+                    <div className="absolute inset-x-0 bottom-0 translate-y-full group-hover:translate-y-0 transition-transform duration-150 bg-gradient-to-t from-black/80 to-transparent p-1.5">
+                      <span className={`text-label block truncate leading-tight ${sp.possible ? "text-amber-300" : "text-white/80"}`}>
+                        {sp.possible && "~"}{sp.text}
+                      </span>
+                    </div>
                     <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${TEMP_COLOR[f.temperament] ?? "bg-border"}`} />
                   </div>
-                  <span className="text-caption text-muted-foreground truncate leading-none">{f.name}</span>
-                </Link>
-              ))}
-            </div>
-          )
-        }
+                  <span className="text-caption text-muted-foreground truncate leading-none px-0.5">{f.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
+      {selected && <PhotoLightbox fish={selected} tick={tick} onClose={() => setSelected(null)} />}
     </div>
   )
 }

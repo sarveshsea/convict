@@ -68,11 +68,11 @@ self.onmessage = function(e) {
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
     ctx.fillStyle = "rgba(" + r + "," + g + "," + b + ",0.9)";
-    ctx.font = "9px 'Fira Code', monospace";
+    ctx.font = (9 * (d.dpr || 1)) + "px 'Fira Code', monospace";
     ctx.textAlign = "left";
     ctx.fillText(zone.name, x1 + 4, y1 + 13);
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "8px 'Fira Code', monospace";
+    ctx.font = (8 * (d.dpr || 1)) + "px 'Fira Code', monospace";
     ctx.fillText(Math.round(frac * 100) + "%", x1 + 4, y1 + 24);
   }
 };
@@ -214,8 +214,9 @@ export function ZoneHeatmap({ zoneTimeFractions, zones }: Props) {
               zones: serialisedZones,
               zoneTimeFractions,
               colors: { bg: CANVAS_COLORS.bg, text: CANVAS_COLORS.text },
-              W: rect.width,
-              H: rect.height,
+              W: rect.width * dpr,
+              H: rect.height * dpr,
+              dpr,
             },
           },
           [offscreen] // transfer ownership — zero-copy

@@ -64,14 +64,14 @@ class Settings(BaseSettings):
     nxt_night_lux_threshold: int = 30
 
     # Tracker
-    tracker_max_age: int = 30
-    tracker_min_hits: int = 3         # entity must be seen 3 consecutive frames before showing
+    tracker_max_age: int = 45          # raised 30→45: keeps track alive longer through occlusion/rock-hiding
+    tracker_min_hits: int = 4         # raised 3→4: reduces false positive tracks from water surface glints
     trail_length: int = 30       # centroids kept in WS payload
     centroid_history_len: int = 150  # in-memory centroid deque per track
 
     # Identity resolver
     identity_min_confidence: float = 0.55
-    identity_ema_alpha: float = 0.15  # weight of new observation vs history
+    identity_ema_alpha: float = 0.20  # weight of new observation vs history (raised 0.15→0.20 for faster re-ID after occlusion)
 
     # Cost weights (must sum to 1.0)
     cost_weight_size: float = 0.20
