@@ -7,7 +7,7 @@ import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useAuthStore, useIsAuthed } from "@/store/authStore"
-import { createFish, deleteFish, resolvePrediction } from "@/lib/api"
+import { createFish, deleteFish, resolvePrediction, getRelationships } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import { fishSnapshotUrl, TEMP_COLOR, PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
 import { ConfidenceBar } from "@/components/ui/confidence-bar"
@@ -472,6 +472,82 @@ function HealthCard() {
   )
 }
 
+// ─── Relationship Edge List ────────────────────────────────────────────────────
+
+type RelEdge = {
+  fish_a_id: string; fish_b_id: string
+  weight: number; dominant_type: string
+  harassment_count: number; proximity_count: number; schooling_count: number
+}
+type RelNode = { id: string; name: string; temperament: string }
+
+const EDGE_COLORS: Record<string, string> = {
+  harassment: "border-rose-400/40 text-rose-400 bg-rose-500/10",
+  proximity:  "border-zinc-500/40 text-zinc-400 bg-zinc-500/10",
+  schooling:  "border-emerald-400/40 text-emerald-400 bg-emerald-500/10",
+  avoidance:  "border-amber-400/40 text-amber-400 bg-amber-400/10",
+}
+const EDGE_DOT: Record<string, string> = {
+  harassment: "bg-rose-400",
+  proximity:  "bg-zinc-500",
+  schooling:  "bg-emerald-400",
+  avoidance:  "bg-amber-400",
+}
+
+function RelationshipSection() {
+  const [edges, setEdges]   = useState<RelEdge[]>([])
+  const [nodes, setNodes]   = useState<Record<string, RelNode>>({})
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getRelationships(24)
+      .then((r) => {
+        const nodeMap: Record<string, RelNode> = {}
+        r.nodes.forEach((n: RelNode) => { nodeMap[n.id] = n })
+        setNodes(nodeMap)
+        setEdges(r.edges.slice(0, 12))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return null
+  if (edges.length === 0) return (
+    <div>
+      <SectionHeader label="Relationships" count={0} countColor="text-muted-foreground" />
+      <EmptyState message="no interactions yet" height="sm" />
+    </div>
+  )
+
+  return (
+    <div>
+      <SectionHeader label="Relationships" count={edges.length} countColor="text-muted-foreground" />
+      <div className="divide-y divide-border/30">
+        {edges.map((e, i) => {
+          const na = nodes[e.fish_a_id]?.name ?? "?"
+          const nb = nodes[e.fish_b_id]?.name ?? "?"
+          const cls = EDGE_COLORS[e.dominant_type] ?? "border-border text-muted-foreground"
+          const dot = EDGE_DOT[e.dominant_type]   ?? "bg-zinc-500"
+          return (
+            <div key={i} className="px-3 py-2 flex items-center gap-2">
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+              <span className="text-caption text-foreground truncate min-w-0 flex-1">
+                {na}
+                <span className="text-muted-foreground mx-1">·</span>
+                {nb}
+              </span>
+              <span className={`text-label px-1.5 py-0.5 rounded border shrink-0 ${cls}`}>
+                {e.dominant_type}
+              </span>
+              <span className="text-label text-muted-foreground tabular-nums shrink-0 w-5 text-right">{e.weight}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Intel Tab ────────────────────────────────────────────────────────────────
 
 function IntelTab() {
@@ -491,6 +567,7 @@ function IntelTab() {
   return (
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
       <HealthCard />
+      <RelationshipSection />
       <div>
         <SectionHeader label="Predictions" count={predictions.length} countColor="text-muted-foreground" />
         {predictions.length === 0 ? (
