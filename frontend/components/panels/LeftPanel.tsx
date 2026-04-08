@@ -2,10 +2,11 @@
 import { useState, useRef, useEffect, useMemo } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown } from "lucide-react"
+import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown, Lock } from "lucide-react"
 import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
+import { useAuthStore, useIsAuthed } from "@/store/authStore"
 import { createFish, deleteFish, resolvePrediction } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import { fishSnapshotUrl, TEMP_COLOR, PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
@@ -50,14 +51,57 @@ function speciesLabel(species: string) {
   return { text: extractCommon(species), muted: false, possible: false }
 }
 
+// ─── Auth Gate ────────────────────────────────────────────────────────────────
+
+function AuthGate() {
+  const { login } = useAuthStore()
+  const [password, setPassword] = useState("")
+  const [error, setError]       = useState(false)
+  const [loading, setLoading]   = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true); setError(false)
+    const ok = await login(password)
+    setLoading(false)
+    if (!ok) setError(true)
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 gap-4 px-6 py-10">
+      <Lock size={20} className="text-muted-foreground" />
+      <div className="text-center">
+        <p className="text-sm font-medium text-foreground">Password required</p>
+        <p className="text-caption text-muted-foreground mt-0.5">Enter admin password to continue</p>
+      </div>
+      <form onSubmit={submit} className="w-full max-w-xs space-y-2">
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(false) }}
+          placeholder="password"
+          autoFocus
+          className={`w-full bg-muted border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none transition-colors ${error ? "border-rose-400/60" : "border-border focus:border-border/80"}`}
+        />
+        {error && <p className="text-caption text-rose-400">Incorrect password</p>}
+        <button type="submit" disabled={!password || loading}
+          className="w-full text-sm py-2 rounded border border-border/60 text-muted-foreground hover:text-foreground hover:border-border transition-colors disabled:opacity-30">
+          {loading ? "verifying…" : "unlock"}
+        </button>
+      </form>
+    </div>
+  )
+}
+
 // ─── Fish Row ─────────────────────────────────────────────────────────────────
 
 function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undefined }) {
   const conf      = entity?.identity?.confidence ?? 0
   const isTracked = !!entity
   const { removeFish } = useTankStore()
-  const [deleting, setDeleting]   = useState(false)
-  const [imgFailed, setImgFailed] = useState(false)
+  const [deleting, setDeleting]         = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [imgFailed, setImgFailed]       = useState(false)
   const sp = speciesLabel(fish.species)
 
   if (deleting) {
@@ -95,14 +139,20 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
       <button
         onClick={async (e) => {
           e.preventDefault()
+          if (!confirmDelete) { setConfirmDelete(true); return }
           setDeleting(true)
           try { await deleteFish(fish.uuid); removeFish(fish.uuid) }
           catch { setDeleting(false) }
         }}
+        onBlur={() => setConfirmDelete(false)}
         disabled={deleting}
-        className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-rose-400 transition-all p-0.5 disabled:opacity-30"
+        className={`absolute top-2.5 right-2 transition-all p-0.5 disabled:opacity-30 ${
+          confirmDelete
+            ? "opacity-100 text-rose-400 hover:text-rose-300 text-caption border border-rose-400/30 rounded px-1 leading-none"
+            : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-rose-400"
+        }`}
       >
-        <X size={12} />
+        {confirmDelete ? "del?" : <X size={12} />}
       </button>
     </div>
   )
@@ -442,6 +492,8 @@ function IntelTab() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+const GATED_TABS: Tab[] = ["config", "roster", "snapshots"]
+
 export function LeftPanel() {
   const [collapsed, setCollapsed] = useState(false)
   const [tab, setTab] = useState<Tab>(() => {
@@ -450,11 +502,17 @@ export function LeftPanel() {
     }
     return "config"
   })
+  const isAuthed = useIsAuthed()
+  const { checkStatus } = useAuthStore()
+
+  useEffect(() => { checkStatus() }, [])
 
   function switchTab(t: Tab) {
     setTab(t)
     if (typeof window !== "undefined") localStorage.setItem("left_panel_tab", t)
   }
+
+  const needsAuth = GATED_TABS.includes(tab) && !isAuthed
 
   if (collapsed) {
     return (
@@ -487,21 +545,29 @@ export function LeftPanel() {
       </div>
 
       <div className="flex items-center border-b border-border/40 shrink-0 px-1 pt-1">
-        {TABS.map(({ key, Icon, label }) => (
-          <button key={key} onClick={() => switchTab(key)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-caption border-b-2 -mb-px transition-colors
-              ${tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <Icon size={13} />
-            {label}
-          </button>
-        ))}
+        {TABS.map(({ key, Icon, label }) => {
+          const isGated = GATED_TABS.includes(key) && !isAuthed
+          return (
+            <button key={key} onClick={() => switchTab(key)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-caption border-b-2 -mb-px transition-colors
+                ${tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              <Icon size={13} />
+              {label}
+              {isGated && <Lock size={9} className="text-muted-foreground/50 ml-0.5" />}
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {tab === "roster"    && <RosterTab />}
-        {tab === "config"    && <ConfigTab />}
-        {tab === "snapshots" && <SnapshotsTab />}
-        {tab === "intel"     && <IntelTab />}
+        {needsAuth ? <AuthGate /> : (
+          <>
+            {tab === "roster"    && <RosterTab />}
+            {tab === "config"    && <ConfigTab />}
+            {tab === "snapshots" && <SnapshotsTab />}
+            {tab === "intel"     && <IntelTab />}
+          </>
+        )}
       </div>
     </aside>
   )
