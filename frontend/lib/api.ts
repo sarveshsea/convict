@@ -68,6 +68,14 @@ export const listPredictions = (status = "active") =>
 export const resolvePrediction = (uuid: string, outcome: "resolved_correct" | "resolved_incorrect", notes?: string) =>
   request<{status: string}>(`/api/v1/observations/predictions/${uuid}/resolve?outcome=${outcome}${notes ? `&notes=${encodeURIComponent(notes)}` : ""}`, { method: "POST" })
 
+// ---- Intelligence ----
+export const getCommunityHealth = (limit = 48) =>
+  request<{ current: { score: number; components: Record<string, number>; computed_at: string } | null; trend: string; history: { computed_at: string; score: number }[] }>(
+    `/api/v1/intelligence/community-health?limit=${limit}`
+  )
+export const getRelationships = (hours = 24) =>
+  request<{ nodes: any[]; edges: any[]; window_hours: number }>(`/api/v1/intelligence/relationships?hours=${hours}`)
+
 // ---- Tank config (3D placement) ----
 export const getTankConfig = () => request<TankConfig>("/api/v1/tank-config")
 export const updateTankDimensions = (data: { width_cm?: number; height_cm?: number; depth_cm?: number }) =>

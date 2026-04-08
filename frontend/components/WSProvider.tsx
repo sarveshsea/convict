@@ -4,18 +4,19 @@ import { convictWS } from "@/lib/ws"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useTankStore } from "@/store/tankStore"
-import { getTank, listFish } from "@/lib/api"
+import { getTank, listFish, getCommunityHealth } from "@/lib/api"
 import type { WSMessage } from "@/lib/ws"
 
 export function WSProvider({ children }: { children: React.ReactNode }) {
   const { setObservationFrame, setPipelineStatus, setCam2ObservationFrame } = useObservationStore()
-  const { addAnomaly, upsertPrediction } = usePredictionStore()
+  const { addAnomaly, upsertPrediction, setCommunityHealth } = usePredictionStore()
   const { setFish, setTank } = useTankStore()
 
   useEffect(() => {
-    // Bootstrap: load tank + fish before WS events start flowing
+    // Bootstrap: load tank + fish + latest health snapshot before WS events start flowing
     getTank().then(setTank).catch(() => {})
     listFish().then(setFish).catch(() => {})
+    getCommunityHealth(1).then((r) => { if (r.current) setCommunityHealth(r.current as any) }).catch(() => {})
 
     convictWS.connect()
 
@@ -68,6 +69,9 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         if (msg.payload?.anomalies?.length) {
           msg.payload.anomalies.forEach((a: any) => addAnomaly(a))
         }
+      }),
+      convictWS.on<any>("community_health", (msg: WSMessage<any>) => {
+        if (msg.payload) setCommunityHealth(msg.payload)
       }),
     ]
 

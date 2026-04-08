@@ -424,6 +424,54 @@ function SnapshotsTab() {
   )
 }
 
+// ─── Community Health Card ─────────────────────────────────────────────────────
+
+function HealthCard() {
+  const health = usePredictionStore((s) => s.communityHealth)
+  if (!health) return null
+
+  const pct   = Math.round(health.score * 100)
+  const color = pct >= 75 ? "text-emerald-400" : pct >= 45 ? "text-amber-400" : "text-rose-400"
+  const ring  = pct >= 75 ? "bg-emerald-400/20 border-emerald-400/30" : pct >= 45 ? "bg-amber-400/20 border-amber-400/30" : "bg-rose-500/20 border-rose-400/30"
+
+  const components = [
+    { key: "aggression_rate", label: "Aggression", invert: true },
+    { key: "social_cohesion", label: "Cohesion",   invert: false },
+    { key: "zone_stability",  label: "Stability",  invert: false },
+    { key: "isolation_index", label: "Isolation",  invert: true },
+  ] as const
+
+  return (
+    <div className="px-3 py-3 border-b border-border/40 space-y-2 shrink-0">
+      <div className="flex items-center justify-between">
+        <span className="text-label text-muted-foreground uppercase tracking-widest">Community Health</span>
+        <span className={`text-sm font-mono font-semibold ${color}`}>{pct}<span className="text-xs text-muted-foreground">/100</span></span>
+      </div>
+      <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
+        <div
+          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-700 ${
+            pct >= 75 ? "bg-emerald-400" : pct >= 45 ? "bg-amber-400" : "bg-rose-500"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {components.map(({ key, label }) => {
+          const val  = health.components[key] ?? 0
+          const vpct = Math.round(val * 100)
+          const c    = vpct >= 70 ? "text-emerald-400" : vpct >= 40 ? "text-amber-400" : "text-rose-400"
+          return (
+            <div key={key} className={`rounded border px-1.5 py-1 ${ring} text-center`}>
+              <div className={`text-xs font-mono font-medium ${c}`}>{vpct}</div>
+              <div className="text-caption text-muted-foreground leading-none mt-0.5">{label}</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Intel Tab ────────────────────────────────────────────────────────────────
 
 function IntelTab() {
@@ -442,6 +490,7 @@ function IntelTab() {
 
   return (
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
+      <HealthCard />
       <div>
         <SectionHeader label="Predictions" count={predictions.length} countColor="text-muted-foreground" />
         {predictions.length === 0 ? (

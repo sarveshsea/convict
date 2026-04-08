@@ -22,17 +22,32 @@ export interface PredictionItem {
   status: "active" | "resolved_correct" | "resolved_incorrect" | "expired"
 }
 
+export interface CommunityHealth {
+  score: number
+  components: {
+    aggression_rate: number
+    social_cohesion: number
+    zone_stability: number
+    isolation_index: number
+  }
+  fish_count: number
+  computed_at: string
+}
+
 interface PredictionState {
   anomalies: AnomalyItem[]
   predictions: PredictionItem[]
+  communityHealth: CommunityHealth | null
   addAnomaly: (a: AnomalyItem) => void
   upsertPrediction: (p: PredictionItem) => void
+  setCommunityHealth: (h: CommunityHealth) => void
   clearExpired: () => void
 }
 
 export const usePredictionStore = create<PredictionState>((set) => ({
   anomalies: [],
   predictions: [],
+  communityHealth: null,
   addAnomaly: (a) =>
     set((s) => ({
       anomalies: [a, ...s.anomalies].slice(0, 50),  // keep last 50
@@ -47,6 +62,7 @@ export const usePredictionStore = create<PredictionState>((set) => ({
       }
       return { predictions: [p, ...s.predictions] }
     }),
+  setCommunityHealth: (h) => set({ communityHealth: h }),
   clearExpired: () =>
     set((s) => ({
       predictions: s.predictions.filter(

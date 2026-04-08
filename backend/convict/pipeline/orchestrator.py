@@ -151,11 +151,14 @@ class PipelineOrchestrator:
         tracker  = FishTracker(settings)
         tracker.reset()
 
-        resolver = IdentityResolver(settings, fish, zones, tank_width_cm=tank_width_cm)
-        baseline = BaselineBuilder(settings)
-        anomaly  = AnomalyDetector(settings, fish, baseline)
-        patterns = PatternModeler(settings, fish, baseline)
+        from convict.engines.intelligence.community_health import CommunityHealthScorer
+
+        resolver  = IdentityResolver(settings, fish, zones, tank_width_cm=tank_width_cm)
+        baseline  = BaselineBuilder(settings)
+        anomaly   = AnomalyDetector(settings, fish, baseline)
+        patterns  = PatternModeler(settings, fish, baseline)
         predictor = PredictionEngine(settings, fish, anomaly, baseline, resolver)
+        health    = CommunityHealthScorer(settings, fish, baseline)
 
         processor = FrameProcessor(camera, detector, tracker, zones,
                                    identity_resolver=resolver)
@@ -168,6 +171,7 @@ class PipelineOrchestrator:
         self._anomaly    = anomaly
         self._patterns   = patterns
         self._predictor  = predictor
+        self._health     = health
         self._fish_list  = fish
 
         camera.start()
@@ -224,6 +228,7 @@ class PipelineOrchestrator:
                         anomaly.update_known_fish(fish)
                         patterns.update_known_fish(fish)
                         predictor._fish = fish
+                        health.update_known_fish(fish)
                         self._fish_list = fish
                     except Exception:
                         log.exception("Fish list refresh failed")
@@ -243,6 +248,7 @@ class PipelineOrchestrator:
                             anomaly.update_known_fish(fish)
                             patterns.update_known_fish(fish)
                             predictor._fish = fish
+                            health.update_known_fish(fish)
                             self._fish_list = fish
                             last_fish_refresh = time.monotonic()
                             log.info("Auto-registered new fish — roster now %d", len(fish))
@@ -327,11 +333,23 @@ class PipelineOrchestrator:
                 if not hasattr(self, "_predictor"):
                     continue
 
+                # ── Drain + persist interaction edges ──────────────────
+                if hasattr(self, "_anomaly"):
+                    pending = self._anomaly.pop_interactions()
+                    if pending:
+                        try:
+                            await _persist_interaction_edges(pending, db=None)
+                        except Exception:
+                            log.exception("Interaction edge persistence error")
+
                 async with AsyncSessionLocal() as db:
+
                     # Patterns
                     new_patterns = await self._patterns.run(db)
                     # Predictions
                     new_preds = await self._predictor.run(db)
+                    # Community health
+                    health_payload = await self._health.run(db)
                     # Species inference for auto-detected fish
                     if not hasattr(self, "_species_guesser"):
                         from convict.engines.intelligence.species_guesser import SpeciesGuesser
@@ -354,10 +372,18 @@ class PipelineOrchestrator:
                         "payload":   p,
                     })
 
+                if health_payload:
+                    await broadcaster.broadcast({
+                        "type":      "community_health",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "seq":       0,
+                        "payload":   health_payload,
+                    })
+
             except asyncio.CancelledError:
                 break
             except Exception:
-                pass  # don't crash the prediction loop on transient errors
+                log.exception("Prediction loop error")  # log instead of silently swallowing
 
     # ------------------------------------------------------------------
     # VLM analysis loop (Gemma via Ollama — optional, every N seconds)
@@ -529,6 +555,71 @@ class PipelineOrchestrator:
         finally:
             cam2.stop()
             log.info("Camera 2 stopped")
+
+
+async def _persist_interaction_edges(pending: list[dict], db) -> None:
+    """
+    Write interaction edge dicts from anomaly_detector to the DB.
+    Each dict has: fish_a, fish_b, initiator|None, interaction_type, duration_seconds.
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from sqlalchemy import select
+    from convict.models.known_fish import KnownFish
+    from convict.models.interaction_edge import InteractionEdge
+    from convict.engines.knowledge.tank_knowledge_engine import get_tank
+    from convict.database import AsyncSessionLocal
+
+    if not pending:
+        return
+
+    async with AsyncSessionLocal() as _db:
+        tank = await get_tank(_db)
+        if not tank:
+            return
+
+        # Cache fish uuid → DB id for this batch
+        all_uuids = set()
+        for p in pending:
+            all_uuids.add(p["fish_a"])
+            all_uuids.add(p["fish_b"])
+            if p.get("initiator"):
+                all_uuids.add(p["initiator"])
+
+        fish_rows = (await _db.execute(
+            select(KnownFish).where(KnownFish.uuid.in_(all_uuids))
+        )).scalars().all()
+        uuid_to_id = {f.uuid: f.id for f in fish_rows}
+
+        now = _dt.utcnow()
+        for p in pending:
+            id_a = uuid_to_id.get(p["fish_a"])
+            id_b = uuid_to_id.get(p["fish_b"])
+            if not id_a or not id_b:
+                continue
+
+            # Canonical ordering: smaller DB id first
+            if id_a > id_b:
+                id_a, id_b = id_b, id_a
+
+            init_id = uuid_to_id.get(p["initiator"]) if p.get("initiator") else None
+
+            edge = InteractionEdge(
+                uuid             = str(_uuid.uuid4()),
+                tank_id          = tank.id,
+                fish_a_id        = id_a,
+                fish_b_id        = id_b,
+                initiator_id     = init_id,
+                interaction_type = p["interaction_type"],
+                occurred_at      = now,
+                duration_seconds = p.get("duration_seconds", 0.0),
+            )
+            _db.add(edge)
+
+        try:
+            await _db.commit()
+        except Exception:
+            await _db.rollback()
 
 
 orchestrator = PipelineOrchestrator()

@@ -12,6 +12,7 @@ export type WSMessageType =
   | "pipeline_status"
   | "baseline_updated"
   | "vlm_analysis"
+  | "community_health"
 
 export interface WSMessage<T = unknown> {
   type: WSMessageType

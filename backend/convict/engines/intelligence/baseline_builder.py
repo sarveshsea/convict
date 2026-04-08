@@ -1,8 +1,8 @@
 """
 Behavioral baseline builder.
 
-Per-frame: accumulates zone time, speed, and activity-by-hour stats for
-each identified fish (confidence >= 0.5 only).
+Per-frame: accumulates zone time, speed, activity-by-hour, and pairwise
+proximity stats for each identified fish (confidence >= 0.5 only).
 
 Every baseline_flush_interval_frames: writes a snapshot to behavior_baselines.
 """
@@ -13,6 +13,9 @@ from collections import defaultdict, deque
 from datetime import datetime
 
 import numpy as np
+
+# Fish within this pixel distance are considered "in proximity"
+_PROXIMITY_PX = 80
 
 
 class BaselineBuilder:
@@ -28,6 +31,8 @@ class BaselineBuilder:
         self._by_hour:     dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         # fish_uuid → total confident frames seen
         self._totals:      dict[str, int]             = defaultdict(int)
+        # fish_uuid → other_fish_uuid → frames spent within _PROXIMITY_PX
+        self._proximity:   dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     # ------------------------------------------------------------------
 
@@ -36,6 +41,7 @@ class BaselineBuilder:
         self._frame_count += 1
         hour = datetime.now().hour
 
+        confident = []
         for e in entities:
             fid  = e["identity"].get("fish_id")
             conf = e["identity"].get("confidence", 0.0)
@@ -51,6 +57,17 @@ class BaselineBuilder:
             self._speeds[fid].append(speed)
 
             self._by_hour[fid][hour] += 1
+            confident.append((fid, e["centroid"]))
+
+        # Pairwise proximity tracking — O(n²) but n is always small (≤20 fish)
+        for i in range(len(confident)):
+            for j in range(i + 1, len(confident)):
+                fid_a, (ax, ay) = confident[i]
+                fid_b, (bx, by) = confident[j]
+                dist = ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
+                if dist < _PROXIMITY_PX:
+                    self._proximity[fid_a][fid_b] += 1
+                    self._proximity[fid_b][fid_a] += 1
 
     async def maybe_flush(self, db) -> None:
         """Flush to DB every baseline_flush_interval_frames frames."""
@@ -75,6 +92,9 @@ class BaselineBuilder:
                 for z, c in self._zone_counts.get(fid, {}).items()
             }
 
+            # Proximity counts — raw frame counts per partner fish uuid
+            proximity = dict(self._proximity.get(fid, {}))
+
             result = await db.execute(select(KnownFish).where(KnownFish.uuid == fid))
             fish   = result.scalar_one_or_none()
             if not fish:
@@ -87,7 +107,7 @@ class BaselineBuilder:
                 mean_speed_px_per_frame  = mean_spd,
                 speed_stddev             = std_spd,
                 activity_by_hour         = json.dumps(dict(self._by_hour.get(fid, {}))),
-                interaction_counts       = json.dumps({}),
+                interaction_counts       = json.dumps(proximity),
                 observation_frame_count  = total,
             )
             db.add(bl)
@@ -98,7 +118,7 @@ class BaselineBuilder:
             await db.rollback()
 
     # ------------------------------------------------------------------
-    # Live query helpers (used by anomaly detector)
+    # Live query helpers
     # ------------------------------------------------------------------
 
     def speed_stats(self, fish_uuid: str) -> tuple[float, float]:
@@ -112,3 +132,7 @@ class BaselineBuilder:
     def zone_fractions(self, fish_uuid: str) -> dict[str, float]:
         total = max(self._totals.get(fish_uuid, 1), 1)
         return {z: c / total for z, c in self._zone_counts.get(fish_uuid, {}).items()}
+
+    def proximity_counts(self, fish_uuid: str) -> dict[str, int]:
+        """Raw frame counts of proximity with each partner fish uuid."""
+        return dict(self._proximity.get(fish_uuid, {}))

@@ -12,12 +12,15 @@ from convict.models.prediction import Prediction
 from convict.models.evidence_bundle import EvidenceBundle
 from convict.models.camera_placement import CameraPlacement
 from convict.models.tank_obstacle import TankObstacle
+from convict.models.interaction_edge import InteractionEdge
+from convict.models.community_health_snapshot import CommunityHealthSnapshot
 
 __all_models__ = [
     Tank, KnownFish, Zone, Schedule, DetectionFrame, Track,
     IdentityHypothesis, BehaviorBaseline, BehaviorEvent,
     BehaviorPattern, Prediction, EvidenceBundle,
     CameraPlacement, TankObstacle,
+    InteractionEdge, CommunityHealthSnapshot,
 ]
 
 __all__ = [m.__name__ for m in __all_models__]
