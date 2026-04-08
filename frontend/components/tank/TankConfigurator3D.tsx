@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useState, useRef } from "react"
+import { Suspense, useCallback, useEffect, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import {
   getTankConfig, updateTankDimensions,
@@ -8,7 +8,7 @@ import {
   createObstacle, deleteObstacle, updateObstacle,
 } from "@/lib/api"
 import { Canvas } from "@react-three/fiber"
-import { OrbitControls, Edges, GizmoHelper, GizmoViewport, Html, Line } from "@react-three/drei"
+import { OrbitControls, Edges, Html, Line } from "@react-three/drei"
 import * as THREE from "three"
 import { STREAM_URL, STREAM_URL_2 } from "@/lib/constants"
 import { useObservationStore } from "@/store/observationStore"
@@ -104,7 +104,7 @@ function TankBox({ w, h, d }: { w: number; h: number; d: number }) {
       {/* Water volume */}
       <mesh>
         <boxGeometry args={[w * 0.999, h * 0.999, d * 0.999]} />
-        <meshBasicMaterial color="#1E3A5F" transparent opacity={0.07} side={THREE.FrontSide} />
+        <meshBasicMaterial color="#1E3A5F" transparent opacity={0.18} side={THREE.FrontSide} />
       </mesh>
     </>
   )
@@ -205,7 +205,7 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
         {/* Body */}
         <mesh>
           <boxGeometry args={[size * 1.8, size, size * 0.9]} />
-          <meshStandardMaterial color="#F97316" metalness={0.4} roughness={0.3} />
+          <meshStandardMaterial color="#3B82F6" metalness={0.4} roughness={0.3} />
         </mesh>
         {/* Lens barrel */}
         <mesh position={[0, 0, size * 0.95]} rotation={[Math.PI / 2, 0, 0]}>
@@ -215,12 +215,12 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
         {/* FOV ghost cone */}
         <mesh position={[0, 0, size * 5]} rotation={[Math.PI / 2, 0, 0]}>
           <coneGeometry args={[size * 3, size * 8, 4, 1, true]} />
-          <meshBasicMaterial color="#F97316" transparent opacity={0.05} side={THREE.DoubleSide} wireframe />
+          <meshBasicMaterial color="#60a5fa" transparent opacity={0.07} side={THREE.DoubleSide} wireframe />
         </mesh>
         {/* Label */}
         <Html position={[0, size * 1.2, 0]} center style={{ pointerEvents: "none" }}>
           <span style={{
-            fontSize: 9, color: "#FB923C", fontFamily: "monospace",
+            fontSize: 9, color: "#93c5fd", fontFamily: "monospace",
             background: "rgba(0,0,0,0.75)", padding: "1px 5px", borderRadius: 2, whiteSpace: "nowrap",
           }}>
             {cam.label}
@@ -231,7 +231,7 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
       {/* Tether: camera body → thumbnail */}
       <Line
         points={[pos as [number, number, number], thumbPos]}
-        color="#F97316"
+        color="#60a5fa"
         lineWidth={0.8}
         transparent
         opacity={0.28}
@@ -242,11 +242,11 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
         <Html center style={{ pointerEvents: "none" }}>
           <div style={{
             width: 110,
-            border: "1.5px solid rgba(249,115,22,0.6)",
+            border: "1.5px solid rgba(96,165,250,0.5)",
             borderRadius: 6,
             overflow: "hidden",
             background: "#09090b",
-            boxShadow: "0 4px 18px rgba(0,0,0,0.85), 0 0 0 1px rgba(249,115,22,0.10)",
+            boxShadow: "0 4px 18px rgba(0,0,0,0.85), 0 0 0 1px rgba(96,165,250,0.08)",
           }}>
             <img
               src={streamUrl(cam.camIndex)}
@@ -257,14 +257,14 @@ function CameraIcon({ cam, w, h, d }: { cam: CamPlacement; w: number; h: number;
               display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
               padding: "3px 6px",
               background: "rgba(9,9,11,0.92)",
-              borderTop: "1px solid rgba(249,115,22,0.18)",
+              borderTop: "1px solid rgba(96,165,250,0.18)",
             }}>
               <div style={{
                 width: 5, height: 5, borderRadius: "50%",
-                background: "#F97316", flexShrink: 0,
-                boxShadow: "0 0 4px rgba(249,115,22,0.7)",
+                background: "#60a5fa", flexShrink: 0,
+                boxShadow: "0 0 4px rgba(96,165,250,0.6)",
               }} />
-              <span style={{ fontSize: 8, color: "#FB923C", fontFamily: "monospace", letterSpacing: "0.08em" }}>
+              <span style={{ fontSize: 8, color: "#93c5fd", fontFamily: "monospace", letterSpacing: "0.08em" }}>
                 CAM {cam.camIndex + 1}
               </span>
             </div>
@@ -444,8 +444,9 @@ function Scene({
   const { widthCm: w, heightCm: h, depthCm: d } = dims
   return (
     <>
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[w * 2, h * 3, d * 2]} intensity={0.9} />
+      <ambientLight intensity={0.4} />
+      <directionalLight position={[w * 2, h * 3, d * 2]} intensity={0.7} />
+      <pointLight position={[-w, h, -d]} intensity={0.3} color="#60a5fa" />
       <TankBox w={w} h={h} d={d} />
       {placingCamera && <WallTargets w={w} h={h} d={d} onPlace={onWallPlace} />}
       {cameras.map(c => <CameraIcon key={c.id} cam={c} w={w} h={h} d={d} />)}
@@ -460,13 +461,10 @@ function Scene({
         />
       )}
       <gridHelper
-        args={[Math.max(w, d) * 2, 24, "#18181B", "#18181B"]}
+        args={[Math.max(w, d) * 2, 24, "rgba(63,63,70,0.3)", "rgba(63,63,70,0.3)"]}
         position={[0, -h / 2, 0]}
       />
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
-      <GizmoHelper alignment="bottom-right" margin={[56, 56]}>
-        <GizmoViewport axisColors={["#EF4444", "#22C55E", "#3B82F6"]} labelColor="white" />
-      </GizmoHelper>
     </>
   )
 }
@@ -491,9 +489,9 @@ function DimInput({
         <input
           type="number" min={1} step={0.5} value={value}
           onChange={e => onChange(Number(e.target.value))}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-sm font-mono text-zinc-100 focus:outline-none focus:border-zinc-600"
+          className="w-full bg-card border border-border rounded px-3 py-1.5 text-caption text-foreground focus:outline-none focus:border-primary/60"
         />
-        <span className="text-xs text-zinc-600 font-mono shrink-0">in</span>
+        <span className="text-caption text-muted-foreground/50 shrink-0">in</span>
       </div>
     </label>
   )
@@ -654,16 +652,16 @@ export function TankConfigurator3D() {
   const gallons = cubicInchesToGallons(dims.widthCm, dims.heightCm, dims.depthCm)
 
   return (
-    <div className="flex h-full bg-zinc-950 overflow-hidden">
+    <div className="flex h-full bg-background overflow-hidden">
 
       {/* ── Left sidebar ── */}
-      <aside className={`shrink-0 flex flex-col border-r border-zinc-800/60 overflow-hidden transition-all duration-200 ${sidebarOpen ? "w-[256px]" : "w-10"}`}>
+      <aside className={`shrink-0 flex flex-col border-r border-border/40 overflow-hidden transition-all duration-200 ${sidebarOpen ? "w-[256px]" : "w-10"}`}>
 
         {/* Collapse toggle */}
-        <div className={`flex items-center border-b border-zinc-800/60 shrink-0 ${sidebarOpen ? "justify-end px-2 py-1.5" : "justify-center py-1.5"}`}>
+        <div className={`flex items-center border-b border-border/40 shrink-0 ${sidebarOpen ? "justify-end px-2 py-1.5" : "justify-center py-1.5"}`}>
           <button
             onClick={() => setSidebarOpen(v => !v)}
-            className="text-zinc-600 hover:text-foreground transition-colors p-1 rounded"
+            className="text-muted-foreground/50 hover:text-foreground transition-colors p-1 rounded"
           >
             {sidebarOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
           </button>
@@ -673,20 +671,20 @@ export function TankConfigurator3D() {
         {sidebarOpen && <div className="flex flex-col flex-1 overflow-y-auto">
 
         {/* Dimensions */}
-        <section className="p-4 border-b border-zinc-800/60">
-          <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Tank dimensions</p>
+        <section className="p-4 border-b border-border/40">
+          <p className="text-label text-muted-foreground mb-3">Tank dimensions</p>
           <div className="flex flex-col gap-3">
             <DimInput label="Width"  value={dims.widthCm}  onChange={v => setDims(p => ({ ...p, widthCm: v }))} />
             <DimInput label="Height" value={dims.heightCm} onChange={v => setDims(p => ({ ...p, heightCm: v }))} />
             <DimInput label="Depth"  value={dims.depthCm}  onChange={v => setDims(p => ({ ...p, depthCm: v }))} />
           </div>
-          <p className="text-xs font-mono text-zinc-600 mt-3">{gallons} gal estimated</p>
+          <p className="text-label text-muted-foreground/50 mt-3">{gallons} gal estimated</p>
         </section>
 
         {/* Cameras */}
-        <section className="p-4 border-b border-zinc-800/60">
+        <section className="p-4 border-b border-border/40">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest">Cameras</p>
+            <p className="text-label text-muted-foreground">Cameras</p>
             <div className="flex items-center gap-2">
               {liveEntities.length > 0 && (
                 <button
@@ -694,38 +692,38 @@ export function TankConfigurator3D() {
                   className={`flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
                     showLive
                       ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
-                      : "border-zinc-700 text-zinc-600 hover:text-zinc-400"
+                      : "border-border text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <span className={`w-1 h-1 rounded-full ${showLive ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                  <span className={`w-1 h-1 rounded-full ${showLive ? "bg-status-healthy" : "bg-muted-foreground/40"}`} />
                   live
                 </button>
               )}
               <button
                 onClick={() => { setPlacingCamera(true); setPending(null) }}
-                className="text-[9px] font-mono text-orange-400 hover:text-orange-300 transition-colors"
+                className="text-label text-primary/70 hover:text-primary transition-colors"
               >+ place</button>
             </div>
           </div>
 
           {placingCamera && (
-            <p className="text-[9px] font-mono text-blue-400 mb-2 animate-pulse">
+            <p className="text-label text-primary/70 mb-2 animate-pulse">
               Click a wall in the 3D view…
             </p>
           )}
 
           {pending && (
-            <div className="flex flex-col gap-2 p-2.5 rounded bg-zinc-900 border border-zinc-700 mb-2">
-              <p className="text-[9px] font-mono text-zinc-400">
-                Wall: <span className="text-orange-400">{pending.wall}</span>
+            <div className="flex flex-col gap-2 p-2.5 rounded bg-card border border-border mb-2">
+              <p className="text-label text-muted-foreground">
+                Wall: <span className="text-primary">{pending.wall}</span>
               </p>
               <input
                 value={camLabel}
                 onChange={e => setCamLabel(e.target.value)}
                 placeholder="Camera label"
-                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-600"
+                className="bg-card border border-border rounded px-2 py-1 text-caption text-foreground focus:outline-none focus:border-primary/60"
               />
-              <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest">Select camera</p>
+              <p className="text-label text-muted-foreground">Select camera</p>
               <div className="flex gap-2">
                 {[0, 1].map(idx => (
                   <button
@@ -733,22 +731,22 @@ export function TankConfigurator3D() {
                     onClick={() => setCamIndex(idx)}
                     className={`flex-1 flex flex-col rounded overflow-hidden border transition-all ${
                       camIndex === idx
-                        ? "border-orange-500 ring-1 ring-orange-500/40"
-                        : "border-zinc-700 hover:border-zinc-500"
+                        ? "border-primary ring-1 ring-primary/40"
+                        : "border-border hover:border-border/80"
                     }`}
                   >
-                    <div className="relative bg-zinc-950" style={{ aspectRatio: "16/9" }}>
+                    <div className="relative bg-background" style={{ aspectRatio: "16/9" }}>
                       <img
                         src={streamUrl(idx)}
                         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                         alt=""
                       />
                       {camIndex === idx && (
-                        <div className="absolute inset-0 ring-inset ring-2 ring-orange-500/60 pointer-events-none rounded" />
+                        <div className="absolute inset-0 ring-inset ring-2 ring-primary/60 pointer-events-none rounded" />
                       )}
                     </div>
                     <div className={`text-center text-[8px] font-mono py-0.5 transition-colors ${
-                      camIndex === idx ? "bg-orange-500/20 text-orange-300" : "bg-zinc-900 text-zinc-500"
+                      camIndex === idx ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground/60"
                     }`}>
                       CAM {idx + 1}
                     </div>
@@ -757,11 +755,11 @@ export function TankConfigurator3D() {
               </div>
               <div className="flex gap-1.5">
                 <button onClick={confirmCamera}
-                  className="flex-1 text-[9px] font-mono bg-orange-500 hover:bg-orange-400 text-white rounded py-1 transition-colors">
+                  className="flex-1 text-label bg-primary hover:bg-primary/90 text-primary-foreground rounded py-1 transition-colors">
                   Confirm
                 </button>
                 <button onClick={() => setPending(null)}
-                  className="flex-1 text-[9px] font-mono bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded py-1 transition-colors">
+                  className="flex-1 text-label bg-card hover:bg-muted/60 text-muted-foreground rounded py-1 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -770,52 +768,52 @@ export function TankConfigurator3D() {
 
           <div className="flex flex-col gap-1">
             {cameras.length === 0
-              ? <p className="text-[9px] font-mono text-zinc-700">No cameras placed</p>
+              ? <p className="text-label text-muted-foreground/30">No cameras placed</p>
               : cameras.map(c => (
                 <div key={c.id}>
                   {editingCamId === c.id ? (
-                    <div className="flex flex-col gap-2 p-2.5 rounded bg-zinc-900 border border-orange-500/40">
+                    <div className="flex flex-col gap-2 p-2.5 rounded bg-card border border-primary/40">
                       <input
                         autoFocus
                         value={c.label}
                         onChange={e => setCameras(p => p.map(x => x.id === c.id ? { ...x, label: e.target.value } : x))}
-                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-600"
+                        className="bg-card border border-border rounded px-2 py-1 text-caption text-foreground focus:outline-none focus:border-primary/60"
                       />
                       <div className="flex gap-2">
                         {[0, 1].map(idx => (
                           <button key={idx} onClick={() => setCameras(p => p.map(x => x.id === c.id ? { ...x, camIndex: idx } : x))}
-                            className={`flex-1 flex flex-col rounded overflow-hidden border transition-all ${c.camIndex === idx ? "border-orange-500" : "border-zinc-700 hover:border-zinc-500"}`}>
+                            className={`flex-1 flex flex-col rounded overflow-hidden border transition-all ${c.camIndex === idx ? "border-primary" : "border-border hover:border-border/80"}`}>
                             <img src={streamUrl(idx)} style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", display: "block" }} alt="" />
-                            <div className={`text-center text-[8px] font-mono py-0.5 ${c.camIndex === idx ? "bg-orange-500/20 text-orange-300" : "bg-zinc-900 text-zinc-500"}`}>
+                            <div className={`text-center text-[8px] font-mono py-0.5 ${c.camIndex === idx ? "bg-primary/15 text-primary" : "bg-card text-muted-foreground/60"}`}>
                               CAM {idx + 1}
                             </div>
                           </button>
                         ))}
                       </div>
-                      <div className="flex items-center justify-between px-2 py-1 rounded bg-zinc-800/60 text-[9px] font-mono text-zinc-500">
-                        <span>wall: <span className="text-orange-400">{c.wall}</span> · u:{c.posU.toFixed(2)} v:{c.posV.toFixed(2)}</span>
+                      <div className="flex items-center justify-between px-2 py-1 rounded bg-muted/30 text-label text-muted-foreground">
+                        <span>wall: <span className="text-primary">{c.wall}</span> · u:{c.posU.toFixed(2)} v:{c.posV.toFixed(2)}</span>
                         <button
                           onClick={() => { setReplacingCamId(c.id); setPlacingCamera(true) }}
                           className="text-blue-400 hover:text-blue-300 transition-colors ml-2"
                         >re-place →</button>
                       </div>
                       <button onClick={() => setEditingCamId(null)}
-                        className="text-[9px] font-mono bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded py-1 transition-colors">
+                        className="text-label bg-card hover:bg-muted/60 text-muted-foreground rounded py-1 transition-colors">
                         done
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 group cursor-pointer hover:bg-zinc-800/60 transition-colors"
+                    <div className="flex items-center gap-2 px-2 py-1.5 rounded bg-card group cursor-pointer hover:bg-muted/40 transition-colors"
                       onClick={() => setEditingCamId(c.id)}>
-                      <div className="shrink-0 w-10 rounded overflow-hidden border border-zinc-700" style={{ aspectRatio: "16/9" }}>
+                      <div className="shrink-0 w-10 rounded overflow-hidden border border-border/60" style={{ aspectRatio: "16/9" }}>
                         <img src={streamUrl(c.camIndex)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} alt="" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[9px] font-mono text-orange-300 truncate">{c.label}</p>
-                        <p className="text-[8px] font-mono text-zinc-600">{c.wall} · CAM {c.camIndex + 1}</p>
+                        <p className="text-caption text-primary/80 truncate">{c.label}</p>
+                        <p className="text-label text-muted-foreground/50">{c.wall} · CAM {c.camIndex + 1}</p>
                       </div>
                       <button onClick={e => { e.stopPropagation(); setCameras(p => p.filter(x => x.id !== c.id)) }}
-                        className="text-[9px] text-zinc-700 hover:text-red-400 leading-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0">×</button>
+                        className="text-label text-muted-foreground/30 hover:text-rose-400 leading-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0">×</button>
                     </div>
                   )}
                 </div>
@@ -827,7 +825,7 @@ export function TankConfigurator3D() {
         {/* Obstacles */}
         <section className="p-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest">Obstacles</p>
+            <p className="text-label text-muted-foreground">Obstacles</p>
             <button onClick={() => setShowObsForm(v => !v)}
               className="text-[9px] font-mono text-zinc-400 hover:text-zinc-200 transition-colors">
               + add
@@ -835,32 +833,32 @@ export function TankConfigurator3D() {
           </div>
 
           {showObsForm && (
-            <div className="flex flex-col gap-2 p-2.5 rounded bg-zinc-900 border border-zinc-700 mb-2">
+            <div className="flex flex-col gap-2 p-2.5 rounded bg-card border border-border mb-2">
               <input
                 value={newObs.label}
                 onChange={e => setNewObs(p => ({ ...p, label: e.target.value }))}
                 placeholder="e.g. Driftwood, Rock"
-                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs font-mono text-zinc-100 focus:outline-none"
+                className="bg-card border border-border rounded px-2 py-1 text-caption text-foreground focus:outline-none focus:border-primary/60"
               />
-              <p className="text-[8px] font-mono text-zinc-600">Position (0–1)</p>
+              <p className="text-label text-muted-foreground/60">Position (0–1)</p>
               <div className="grid grid-cols-3 gap-1">
                 {(["xF", "yF", "zF"] as const).map(k => (
                   <input key={k} type="number" step={0.05} min={0} max={1}
                     value={newObs[k]}
                     onChange={e => setNewObs(p => ({ ...p, [k]: Number(e.target.value) }))}
                     placeholder={k === "xF" ? "X" : k === "yF" ? "Y" : "Z"}
-                    className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[10px] font-mono text-zinc-100 focus:outline-none"
+                    className="bg-card border border-border rounded px-1.5 py-1 text-caption text-foreground focus:outline-none focus:border-primary/60"
                   />
                 ))}
               </div>
-              <p className="text-[8px] font-mono text-zinc-600">Size (fraction of tank)</p>
+              <p className="text-label text-muted-foreground/60">Size (fraction of tank)</p>
               <div className="grid grid-cols-3 gap-1">
                 {(["wF", "hF", "dF"] as const).map(k => (
                   <input key={k} type="number" step={0.05} min={0.01} max={1}
                     value={newObs[k]}
                     onChange={e => setNewObs(p => ({ ...p, [k]: Number(e.target.value) }))}
                     placeholder={k === "wF" ? "W" : k === "hF" ? "H" : "D"}
-                    className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[10px] font-mono text-zinc-100 focus:outline-none"
+                    className="bg-card border border-border rounded px-1.5 py-1 text-caption text-foreground focus:outline-none focus:border-primary/60"
                   />
                 ))}
               </div>
@@ -874,11 +872,11 @@ export function TankConfigurator3D() {
               </div>
               <div className="flex gap-1.5">
                 <button onClick={addObstacle}
-                  className="flex-1 text-[9px] font-mono bg-zinc-600 hover:bg-zinc-500 text-white rounded py-1 transition-colors">
+                  className="flex-1 text-label bg-primary hover:bg-primary/90 text-primary-foreground rounded py-1 transition-colors">
                   Add
                 </button>
                 <button onClick={() => setShowObsForm(false)}
-                  className="flex-1 text-[9px] font-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded py-1 transition-colors">
+                  className="flex-1 text-label bg-card hover:bg-muted/60 text-muted-foreground rounded py-1 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -887,15 +885,15 @@ export function TankConfigurator3D() {
 
           <div className="flex flex-col gap-1">
             {obstacles.length === 0
-              ? <p className="text-[9px] font-mono text-zinc-700">No obstacles added</p>
+              ? <p className="text-label text-muted-foreground/30">No obstacles added</p>
               : obstacles.map(o => (
-                <div key={o.id} className="flex items-center justify-between px-2 py-1 rounded bg-zinc-900">
+                <div key={o.id} className="flex items-center justify-between px-2 py-1 rounded bg-card">
                   <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-sm shrink-0" style={{ background: o.color }} />
-                    <span className="text-[9px] font-mono text-zinc-300 truncate">{o.label}</span>
+                    <span className="text-caption text-foreground/80 truncate">{o.label}</span>
                   </div>
                   <button onClick={() => setObstacles(p => p.filter(x => x.id !== o.id))}
-                    className="text-[9px] text-zinc-600 hover:text-red-400 shrink-0 leading-none">×</button>
+                    className="text-label text-muted-foreground/30 hover:text-rose-400 shrink-0 leading-none">×</button>
                 </div>
               ))
             }
@@ -903,12 +901,12 @@ export function TankConfigurator3D() {
         </section>
 
         {/* Save */}
-        <div className="p-4 mt-auto border-t border-zinc-800/60">
+        <div className="p-4 mt-auto border-t border-border/40">
           <button
             onClick={handleSave}
             disabled={saving}
             className="w-full py-2 rounded text-[10px] font-mono uppercase tracking-widest transition-colors disabled:opacity-50
-              bg-orange-500 hover:bg-orange-400 text-white"
+              bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             {saving ? "Saving…" : saveStatus === "ok" ? "Saved ✓" : saveStatus === "err" ? "Error ✗" : "Save layout"}
           </button>
@@ -917,15 +915,15 @@ export function TankConfigurator3D() {
       </aside>
 
       {/* ── 3D canvas ── */}
-      <div className="flex-1 relative min-w-0">
+      <div className="flex-1 relative min-w-0 bg-[#09090b] bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,rgba(59,130,246,0.06),transparent)]">
         {placingCamera && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 px-4 py-2 rounded bg-zinc-900/90 border border-blue-800/60">
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 px-4 py-2 rounded bg-background/90 border border-primary/30">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
             <span className="text-[9px] font-mono text-blue-300 uppercase tracking-widest">
               {replacingCamId ? "Click a wall to move camera" : "Click a wall to place"}
             </span>
             <button onClick={() => { setPlacingCamera(false); setReplacingCamId(null) }}
-              className="text-[9px] font-mono text-zinc-500 hover:text-white transition-colors">
+              className="text-label text-muted-foreground hover:text-foreground transition-colors">
               cancel
             </button>
           </div>
@@ -938,7 +936,7 @@ export function TankConfigurator3D() {
             near: 0.1,
             far: 10000,
           }}
-          style={{ background: "#09090b" }}
+          style={{ background: "transparent" }}
         >
           <Suspense fallback={null}>
             <Scene
