@@ -1,10 +1,11 @@
 "use client"
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import Link from "next/link"
 import {
   getFishSummary, getFishZoneHeatmap,
   getFishInteractionHistory, getFishConfidenceHistory,
+  getRelationships,
   type FishSummary, type BehaviorEvent, type ConfidencePoint,
 } from "@/lib/api"
 import { useTankStore } from "@/store/tankStore"
@@ -27,11 +28,73 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "evidence",     label: "Evidence Chain" },
 ]
 
+// ── Behavioral fingerprint derived from baseline + interaction data ──────────
+
+interface Fingerprint {
+  peakHour: number | null          // hour of day with most activity
+  topPartner: string | null        // name of most-interacted fish
+  topPartnerType: string | null    // dominant interaction type with top partner
+  role: "aggressor" | "passive" | "social" | "loner" | null
+  dominantZoneId: string | null    // zone uuid with highest fraction
+}
+
+function deriveFingerprint(
+  baseline: FishSummary["baseline"],
+  edges: { fish_a_id: string; fish_b_id: string; weight: number; dominant_type: string; harassment_count: number }[],
+  fishUuid: string,
+  zones: { uuid: string; name: string }[],
+): Fingerprint {
+  // Peak hour
+  const byHour = baseline?.activity_by_hour ?? {}
+  const hourEntries = Object.entries(byHour).map(([h, c]) => [parseInt(h), c as number] as const)
+  const peakHour = hourEntries.length > 0
+    ? hourEntries.reduce((a, b) => b[1] > a[1] ? b : a)[0]
+    : null
+
+  // Top partner from edges
+  const mine = edges.filter((e) => e.fish_a_id === fishUuid || e.fish_b_id === fishUuid)
+  const top  = mine.sort((a, b) => b.weight - a.weight)[0]
+  const topPartner     = top ? null : null   // resolved below in component with nodeNames
+  const topPartnerType = top?.dominant_type ?? null
+
+  // Role: aggressor if harassment edges are mostly initiated by this fish
+  //       social if schooling edges exist
+  //       loner if no edges at all
+  //       passive otherwise
+  const harassmentEdges = mine.filter((e) => e.dominant_type === "harassment")
+  const schoolingEdges  = mine.filter((e) => e.dominant_type === "schooling")
+  let role: Fingerprint["role"] = null
+  if (mine.length === 0) {
+    role = "loner"
+  } else if (schoolingEdges.length >= harassmentEdges.length && schoolingEdges.length > 0) {
+    role = "social"
+  } else if (harassmentEdges.length > 0) {
+    role = "aggressor"
+  } else {
+    role = "passive"
+  }
+
+  // Dominant zone
+  const zoneFracs = baseline?.zone_time_fractions ?? {}
+  const topZone = Object.entries(zoneFracs).sort((a, b) => (b[1] as number) - (a[1] as number))[0]
+  const dominantZoneId = topZone ? topZone[0] : null
+
+  return { peakHour, topPartner, topPartnerType, role, dominantZoneId }
+}
+
+const ROLE_STYLE: Record<string, string> = {
+  aggressor: "text-rose-400 border-rose-400/30 bg-rose-500/10",
+  passive:   "text-zinc-400 border-zinc-500/30 bg-zinc-500/10",
+  social:    "text-emerald-400 border-emerald-400/30 bg-emerald-500/10",
+  loner:     "text-amber-400 border-amber-400/30 bg-amber-400/10",
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function FishDrilldown() {
-  const params  = useParams()
-  const router  = useRouter()
-  const fishId  = params.fishId as string
-  const zones   = useTankStore((s) => s.zones)
+  const params   = useParams()
+  const fishId   = params.fishId as string
+  const zones    = useTankStore((s) => s.zones)
   const entities = useObservationStore((s) => s.entities)
 
   const [tab,     setTab]     = useState<Tab>("heatmap")
@@ -42,19 +105,29 @@ export default function FishDrilldown() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
+  // Relationship data for fingerprint
+  const [relEdges,     setRelEdges]     = useState<any[]>([])
+  const [relNodeNames, setRelNodeNames] = useState<Record<string, string>>({})
+
   useEffect(() => {
     async function load() {
       try {
-        const [sum, hm, evts, hist] = await Promise.all([
+        const [sum, hm, evts, hist, rel] = await Promise.all([
           getFishSummary(fishId),
           getFishZoneHeatmap(fishId),
           getFishInteractionHistory(fishId),
           getFishConfidenceHistory(fishId),
+          getRelationships(168).catch(() => ({ nodes: [], edges: [] })),
         ])
         setSummary(sum)
         setHeatmap(hm.zone_time_fractions)
         setEvents(evts)
         setHistory(hist)
+
+        const nameMap: Record<string, string> = {}
+        rel.nodes.forEach((n: { id: string; name: string }) => { nameMap[n.id] = n.name })
+        setRelNodeNames(nameMap)
+        setRelEdges(rel.edges.filter((e: any) => e.fish_a_id === fishId || e.fish_b_id === fishId))
       } catch (e: any) {
         setError(e.message ?? "Failed to load fish")
       } finally {
@@ -86,20 +159,26 @@ export default function FishDrilldown() {
 
   const { fish, baseline } = summary
 
-  // Check if currently tracked
-  const liveEntity   = entities.find((e) => e.identity?.fish_id === fish.uuid)
-  const isTracked    = !!liveEntity
-  const liveConf     = liveEntity?.identity?.confidence ?? 0
-  const speciesGuessConf = fish.species_guess_confidence ?? null
+  // Live tracking state
+  const liveEntity        = entities.find((e) => e.identity?.fish_id === fish.uuid)
+  const isTracked         = !!liveEntity
+  const liveConf          = liveEntity?.identity?.confidence ?? 0
+  const speciesGuessConf  = fish.species_guess_confidence ?? null
+
+  // Behavioral fingerprint
+  const fp = deriveFingerprint(baseline, relEdges, fish.uuid, zones)
+
+  // Top partner name (needs nodeNames)
+  const topEdge        = relEdges.sort((a, b) => b.weight - a.weight)[0]
+  const topPartnerId   = topEdge ? (topEdge.fish_a_id === fish.uuid ? topEdge.fish_b_id : topEdge.fish_a_id) : null
+  const topPartnerName = topPartnerId ? (relNodeNames[topPartnerId] ?? null) : null
+  const dominantZone   = fp.dominantZoneId ? zones.find((z) => z.uuid === fp.dominantZoneId) : null
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 max-w-2xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <Link
-          href="/dashboard"
-          className="text-label text-muted-foreground hover:text-foreground block mb-4"
-        >
+        <Link href="/dashboard" className="text-label text-muted-foreground hover:text-foreground block mb-4">
           ← dashboard
         </Link>
 
@@ -122,13 +201,11 @@ export default function FishDrilldown() {
             <span className={`text-label px-1.5 py-0.5 rounded border ${TEMP_TEXT_COLOR[fish.temperament] ?? "text-muted-foreground border-border"}`}>
               {fish.temperament}
             </span>
-            <span className="text-label text-muted-foreground border border-border rounded px-1.5 py-0.5" data-value>
+            <span className="text-label text-muted-foreground border border-border rounded px-1.5 py-0.5">
               {fish.size_class}
             </span>
             {fish.estimated_length_cm && (
-              <span className="text-label text-muted-foreground" data-value>
-                {fish.estimated_length_cm}cm
-              </span>
+              <span className="text-label text-muted-foreground">{fish.estimated_length_cm}cm</span>
             )}
           </div>
         </div>
@@ -142,6 +219,41 @@ export default function FishDrilldown() {
 
         {fish.appearance_notes && (
           <p className="text-caption text-muted-foreground mt-2">{fish.appearance_notes}</p>
+        )}
+
+        {/* ── Behavioral Fingerprint ──────────────────────────────────── */}
+        {(fp.role || fp.peakHour !== null || dominantZone || topPartnerName) && (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {fp.role && (
+              <div className={`rounded border px-2.5 py-2 ${ROLE_STYLE[fp.role]}`}>
+                <p className="text-label text-muted-foreground">Role</p>
+                <p className="text-caption font-medium mt-0.5 capitalize">{fp.role}</p>
+              </div>
+            )}
+            {fp.peakHour !== null && (
+              <div className="rounded border border-border/40 bg-card px-2.5 py-2">
+                <p className="text-label text-muted-foreground">Peak Hour</p>
+                <p className="text-caption font-mono font-medium mt-0.5">
+                  {String(fp.peakHour).padStart(2, "0")}:00
+                </p>
+              </div>
+            )}
+            {dominantZone && (
+              <div className="rounded border border-border/40 bg-card px-2.5 py-2">
+                <p className="text-label text-muted-foreground">Home Zone</p>
+                <p className="text-caption font-medium mt-0.5 truncate">{dominantZone.name}</p>
+              </div>
+            )}
+            {topPartnerName && (
+              <div className="rounded border border-border/40 bg-card px-2.5 py-2">
+                <p className="text-label text-muted-foreground">Most With</p>
+                <p className="text-caption font-medium mt-0.5 truncate">{topPartnerName}</p>
+                {topEdge?.dominant_type && (
+                  <p className="text-label text-muted-foreground capitalize">{topEdge.dominant_type}</p>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
