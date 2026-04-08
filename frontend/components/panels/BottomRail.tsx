@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useObservationStore } from "@/store/observationStore"
 import { EVENT_DOT } from "@/lib/constants"
@@ -196,6 +197,13 @@ export function BottomRail() {
         {anomalies.length === 0 && (
           <span className="text-label text-muted-foreground">no events yet</span>
         )}
+      </div>
+
+      {/* Nav links */}
+      <div className="ml-auto flex items-center gap-2 shrink-0 pl-3 border-l border-border/40">
+        <Link href="/dashboard/graph" className="text-label text-muted-foreground hover:text-foreground transition-colors">graph</Link>
+        <span className="text-border">/</span>
+        <Link href="/dashboard/timeline" className="text-label text-muted-foreground hover:text-foreground transition-colors">timeline</Link>
       </div>
 
       {/* Clock */}
