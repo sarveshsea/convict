@@ -334,6 +334,7 @@ class PipelineOrchestrator:
                 try:
                     new_events = anomaly.update(entities)
                     if new_events:
+                        from convict.engines.control.device_controller import controller as _devices
                         tank_id = tank.id if tank else None
                         async with AsyncSessionLocal() as db:
                             for ev in new_events:
@@ -347,13 +348,12 @@ class PipelineOrchestrator:
                                     "seq":       0,
                                     "payload":   ev,
                                 })
+                                # Auto-respond with device actions (non-blocking)
+                                asyncio.create_task(_devices.on_anomaly(ev))
                             try:
                                 await db.commit()
                             except Exception:
                                 await db.rollback()
-                    else:
-                        for ev in new_events:
-                            predictor.record_event(ev)
                 except Exception:
                     log.exception("Anomaly update/broadcast error")
 

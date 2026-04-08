@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     aggression_streak_threshold: int = 3
     isolation_window_threshold: int = 3
 
+    # Smart plugs (TP-Link Kasa — requires: pip install python-kasa)
+    # Set in .env.local — leave empty to disable
+    kasa_plug_1_ip:    str = ""          # e.g. 192.168.1.100
+    kasa_plug_1_label: str = "air_pump"
+    kasa_plug_2_ip:    str = ""          # e.g. 192.168.1.101
+    kasa_plug_2_label: str = "light"
+
     @property
     def database_url(self) -> str:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

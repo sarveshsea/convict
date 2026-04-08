@@ -21,9 +21,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     from convict.pipeline.orchestrator import orchestrator
     await orchestrator.start()
+    from convict.engines.control.device_controller import controller as device_controller
+    await device_controller.initialize()
     yield
     # Shutdown
     await orchestrator.stop()
+    from convict.engines.control.device_controller import controller as device_controller
+    await device_controller.shutdown()
     # Cleanly terminate ffmpeg HLS processes (no-op if ffmpeg was never started)
     try:
         from convict.engines.observation.hls_streamer import hls_streamer, hls_streamer2
