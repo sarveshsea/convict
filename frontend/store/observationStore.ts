@@ -28,6 +28,7 @@ export interface PipelineStatus {
   track_count: number
   identity_resolution_health: number
   queue_lag_frames: number
+  camera_restarting?: boolean
 }
 
 interface ObservationState {

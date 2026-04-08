@@ -25,14 +25,19 @@ from convict.engines.experience.ws_broadcaster import broadcaster
 log = logging.getLogger("convict.orchestrator")
 
 
+# How long camera must be inactive before the watchdog restarts the pipeline (seconds)
+_CAMERA_DEAD_TIMEOUT = 45.0
+
+
 class PipelineOrchestrator:
     def __init__(self):
         self._running    = False
-        self._task: asyncio.Task | None        = None
-        self._pred_task: asyncio.Task | None   = None
-        self._cam2_task: asyncio.Task | None   = None
-        self._vlm_task: asyncio.Task | None    = None
-        self._started_at: datetime | None      = None
+        self._task: asyncio.Task | None          = None
+        self._pred_task: asyncio.Task | None     = None
+        self._cam2_task: asyncio.Task | None     = None
+        self._vlm_task: asyncio.Task | None      = None
+        self._watchdog_task: asyncio.Task | None = None
+        self._started_at: datetime | None        = None
         self._camera: Any  = None
         self._processor: Any = None
 
@@ -48,21 +53,22 @@ class PipelineOrchestrator:
             return
         self._running    = True
         self._started_at = datetime.utcnow()
-        self._task       = asyncio.create_task(self._run_loop(),     name="pipeline")
-        self._pred_task  = asyncio.create_task(self._predict_loop(), name="predictor")
+        self._task          = asyncio.create_task(self._run_loop(),       name="pipeline")
+        self._pred_task     = asyncio.create_task(self._predict_loop(),   name="predictor")
+        self._watchdog_task = asyncio.create_task(self._camera_watchdog(), name="cam-watchdog")
         if settings.vlm_enabled:
             self._vlm_task = asyncio.create_task(self._vlm_analysis_loop(), name="vlm")
 
     async def stop(self) -> None:
         self._running = False
-        for t in [self._task, self._pred_task, self._cam2_task, self._vlm_task]:
+        for t in [self._task, self._pred_task, self._cam2_task, self._vlm_task, self._watchdog_task]:
             if t:
                 t.cancel()
                 try:
                     await t
                 except asyncio.CancelledError:
                     pass
-        self._task = self._pred_task = self._cam2_task = self._vlm_task = None
+        self._task = self._pred_task = self._cam2_task = self._vlm_task = self._watchdog_task = None
         if self._camera:
             self._camera.stop()
 
@@ -399,6 +405,87 @@ class PipelineOrchestrator:
                 break
             except Exception:
                 log.exception("Prediction loop error")  # log instead of silently swallowing
+
+    # ------------------------------------------------------------------
+    # Camera watchdog — restarts pipeline if camera is dead too long
+    # ------------------------------------------------------------------
+
+    async def _camera_watchdog(self) -> None:
+        """
+        Monitors camera health every 5 seconds.
+        If the camera has been inactive for > _CAMERA_DEAD_TIMEOUT seconds,
+        restarts the entire pipeline (stop + start) so the camera thread
+        is re-created fresh.
+
+        The camera's own _run() thread handles short-term recovery (USB glitches,
+        brief stalls) via its internal reopen loop. This watchdog handles the
+        case where the camera hardware is genuinely gone for a long time and the
+        internal loop isn't recovering.
+        """
+        from convict.engines.observation.mjpeg_streamer import streamer
+
+        # Give the pipeline time to start before watching
+        await asyncio.sleep(20)
+
+        dead_since: float | None = None
+
+        while self._running:
+            await asyncio.sleep(5)
+
+            try:
+                cam_ok = bool(
+                    self._camera
+                    and self._camera.is_active
+                    and streamer.is_active
+                )
+
+                if cam_ok:
+                    dead_since = None
+                    continue
+
+                now = time.monotonic()
+                if dead_since is None:
+                    dead_since = now
+                    log.warning("Camera watchdog: camera inactive — monitoring")
+                    continue
+
+                elapsed = now - dead_since
+                if elapsed >= _CAMERA_DEAD_TIMEOUT:
+                    log.error(
+                        "Camera watchdog: camera dead for %.0fs — restarting pipeline",
+                        elapsed,
+                    )
+                    dead_since = None
+
+                    # Restart pipeline — stop main loop, recreate it
+                    if self._task:
+                        self._task.cancel()
+                        try:
+                            await self._task
+                        except asyncio.CancelledError:
+                            pass
+                    if self._camera:
+                        self._camera.stop()
+                        self._camera = None
+                        self._processor = None
+
+                    await asyncio.sleep(2.0)  # brief pause before reopen
+
+                    self._task = asyncio.create_task(
+                        self._run_loop(), name="pipeline"
+                    )
+                    await broadcaster.broadcast({
+                        "type":      "pipeline_status",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "seq":       0,
+                        "payload":   {**self.status(), "camera_restarting": True},
+                    })
+                    log.info("Camera watchdog: pipeline restarted")
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("Camera watchdog error")
 
     # ------------------------------------------------------------------
     # VLM analysis loop (Gemma via Ollama — optional, every N seconds)

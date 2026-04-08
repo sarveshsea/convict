@@ -142,7 +142,7 @@ export function TopStrip() {
 
   const identifiedCount = entities.filter((e) => (e.identity?.confidence ?? 0) >= 0.55).length
   const health          = pipeline.running ? pipeline.identity_resolution_health : null
-  const pipelineColor   = pipeline.camera_active ? "healthy" : pipeline.running ? "warning" : "off"
+  const pipelineColor   = pipeline.camera_active ? "healthy" : (pipeline.running || pipeline.camera_restarting) ? "warning" : "off"
 
   const highCount   = anomalies.filter((a) => a.severity === "high").length
   const medCount    = anomalies.filter((a) => a.severity === "medium").length
@@ -253,7 +253,7 @@ export function TopStrip() {
           <Dot color={pipelineColor} />
           <div className="flex flex-col items-end">
             <span className="text-caption text-muted-foreground leading-none">
-              {pipeline.camera_active ? "LIVE" : pipeline.running ? "STARTING" : "OFFLINE"}
+              {pipeline.camera_active ? "LIVE" : pipeline.camera_restarting ? "RECONNECTING" : pipeline.running ? "STARTING" : "OFFLINE"}
             </span>
             {pipeline.camera_active && <Uptime startedAt={pipeline.running ? new Date(Date.now() - 1000).toISOString() : null} />}
           </div>
