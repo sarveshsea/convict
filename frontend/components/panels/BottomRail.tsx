@@ -143,27 +143,29 @@ export function BottomRail() {
         </span>
       )}
 
-      {/* Telemetry — single block, 1 border-r */}
-      <div className="flex items-center gap-3 shrink-0 pr-4 border-r border-border/40">
-        <span className="text-label tabular-nums">
-          <span className={fpsColor} data-value>
-            {pipeline.detection_fps > 0 ? `${pipeline.detection_fps.toFixed(1)}fps` : "0fps"}
+      {/* Telemetry — only shown when pipeline is running */}
+      {pipeline.running && (
+        <div className="flex items-center gap-3 shrink-0 pr-4 border-r border-border/40">
+          <span className="text-label tabular-nums">
+            <span className={fpsColor} data-value>
+              {pipeline.detection_fps > 0 ? `${pipeline.detection_fps.toFixed(1)}fps` : "0fps"}
+            </span>
+            {pipeline.inference_latency_ms > 0 && (
+              <span className={latColor} data-value> · {pipeline.inference_latency_ms.toFixed(0)}ms</span>
+            )}
           </span>
-          {pipeline.inference_latency_ms > 0 && (
-            <span className={latColor} data-value> · {pipeline.inference_latency_ms.toFixed(0)}ms</span>
-          )}
-        </span>
-        <div className="flex items-center gap-1">
-          <TrackSparkline count={pipeline.track_count} />
-          <span className="text-label text-muted-foreground tabular-nums" data-value>{pipeline.track_count}t</span>
+          <div className="flex items-center gap-1">
+            <TrackSparkline count={pipeline.track_count} />
+            <span className="text-label text-muted-foreground tabular-nums" data-value>{pipeline.track_count}t</span>
+          </div>
+          {anomalies.length > 0 && <EventHistogram anomalies={anomalies} />}
         </div>
-        {anomalies.length > 0 && <EventHistogram anomalies={anomalies} />}
-      </div>
+      )}
 
       {/* Event stream */}
       <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
         {grouped.length === 0
-          ? <span className="text-label text-muted-foreground/40">quiet</span>
+          ? (pipeline.running ? <span className="text-label text-muted-foreground/40">quiet</span> : null)
           : grouped.map((g) => (
             <div key={g.uuid} className={`flex items-center gap-0.5 shrink-0 group relative ${dotOpacity(g.last_at)}`}>
               <span className={`w-2 h-2 rounded-full ${EVENT_DOT[g.event_type] ?? "bg-zinc-500"}`} />

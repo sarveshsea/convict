@@ -173,13 +173,15 @@ export function TopStrip() {
 
       {/* Center */}
       <div className="flex items-center gap-5 flex-1 justify-center min-w-0">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col leading-none gap-0.5">
-            <span className="text-label text-muted-foreground">Entities</span>
-            <span className="text-caption tabular-nums text-foreground" data-value>{entities.length}</span>
+        {pipeline.running && (
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col leading-none gap-0.5">
+              <span className="text-label text-muted-foreground">Entities</span>
+              <span className="text-caption tabular-nums text-foreground" data-value>{entities.length}</span>
+            </div>
+            {entities.length > 0 && <IdRatioBar identified={identifiedCount} total={entities.length} />}
           </div>
-          {entities.length > 0 && <IdRatioBar identified={identifiedCount} total={entities.length} />}
-        </div>
+        )}
 
         {pipeline.running && (
           <div className="flex items-center gap-1.5" title="Detection FPS">
