@@ -7,7 +7,7 @@ import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useAuthStore, useIsAuthed } from "@/store/authStore"
-import { createFish, deleteFish, resolvePrediction, getRelationships, getIncidents } from "@/lib/api"
+import { createFish, deleteFish, resolvePrediction, getRelationships, getIncidents, getCommunityHealth } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import { fishSnapshotUrl, TEMP_COLOR, PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
 import { ConfidenceBar } from "@/components/ui/confidence-bar"
@@ -439,28 +439,44 @@ function SnapshotsTab() {
 
 function HealthCard() {
   const health = usePredictionStore((s) => s.communityHealth)
+  const [trend, setTrend] = useState<"improving" | "declining" | "stable" | null>(null)
+
+  useEffect(() => {
+    getCommunityHealth(12).then((r) => setTrend(r.trend as "improving" | "declining" | "stable")).catch(() => {})
+  }, [health?.computed_at])
+
   if (!health) return null
 
   const pct   = Math.round(health.score * 100)
   const color = pct >= 75 ? "text-emerald-400" : pct >= 45 ? "text-amber-400" : "text-rose-400"
   const ring  = pct >= 75 ? "bg-emerald-400/20 border-emerald-400/30" : pct >= 45 ? "bg-amber-400/20 border-amber-400/30" : "bg-rose-500/20 border-rose-400/30"
+  const trendEl = trend === "improving" ? <span className="text-emerald-400">↑</span>
+    : trend === "declining" ? <span className="text-rose-400">↓</span>
+    : trend === "stable"    ? <span className="text-muted-foreground">→</span>
+    : null
 
   const components = [
-    { key: "aggression_rate", label: "Aggression", invert: true },
-    { key: "social_cohesion", label: "Cohesion",   invert: false },
-    { key: "zone_stability",  label: "Stability",  invert: false },
-    { key: "isolation_index", label: "Isolation",  invert: true },
+    { key: "aggression_rate", label: "Aggr" },
+    { key: "social_cohesion", label: "Coh"  },
+    { key: "zone_stability",  label: "Zone" },
+    { key: "isolation_index", label: "Isol" },
   ] as const
 
   return (
     <div className="px-3 py-3 border-b border-border/40 space-y-2 shrink-0">
       <div className="flex items-center justify-between">
-        <span className="text-label text-muted-foreground uppercase tracking-widest">Community Health</span>
-        <span className={`text-sm font-mono font-semibold ${color}`}>{pct}<span className="text-xs text-muted-foreground">/100</span></span>
+        <div className="flex items-center gap-2">
+          <span className="text-label text-muted-foreground">Community Health</span>
+          {trendEl && <span className="text-label">{trendEl}</span>}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-label text-muted-foreground/50">{health.fish_count}f</span>
+          <span className={`text-sm font-mono font-semibold ${color}`} data-value>{pct}<span className="text-xs text-muted-foreground">/100</span></span>
+        </div>
       </div>
-      <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
+      <div className="relative h-1 bg-muted overflow-hidden">
         <div
-          className={`absolute left-0 top-0 h-full rounded-full transition-all duration-700 ${
+          className={`absolute left-0 top-0 h-full transition-all duration-700 ${
             pct >= 75 ? "bg-emerald-400" : pct >= 45 ? "bg-amber-400" : "bg-rose-500"
           }`}
           style={{ width: `${pct}%` }}
@@ -473,8 +489,8 @@ function HealthCard() {
           const c    = vpct >= 70 ? "text-emerald-400" : vpct >= 40 ? "text-amber-400" : "text-rose-400"
           return (
             <div key={key} className={`rounded border px-1.5 py-1 ${ring} text-center`}>
-              <div className={`text-xs font-mono font-medium ${c}`}>{vpct}</div>
-              <div className="text-caption text-muted-foreground leading-none mt-0.5">{label}</div>
+              <div className={`text-xs font-mono font-medium ${c}`} data-value>{vpct}</div>
+              <div className="text-label text-muted-foreground leading-none mt-0.5">{label}</div>
             </div>
           )
         })}
@@ -530,9 +546,20 @@ function RelationshipSection() {
     </div>
   )
 
+  const topConflict = edges.filter((e) => e.harassment_count > 0).sort((a, b) => b.harassment_count - a.harassment_count)[0] ?? null
+
   return (
     <div>
       <SectionHeader label="Relationships" count={edges.length} countColor="text-muted-foreground" />
+      {topConflict && (
+        <div className="mx-3 mb-1 mt-1 flex items-center gap-2 rounded border border-rose-500/30 bg-rose-500/8 px-2.5 py-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0 animate-pulse" />
+          <span className="text-caption text-foreground flex-1 truncate">
+            {nodes[topConflict.fish_a_id]?.name ?? "?"} <span className="text-muted-foreground">vs</span> {nodes[topConflict.fish_b_id]?.name ?? "?"}
+          </span>
+          <span className="text-label text-rose-400 tabular-nums shrink-0" data-value>{topConflict.harassment_count} conflicts</span>
+        </div>
+      )}
       <div className="divide-y divide-border/30">
         {edges.map((e, i) => {
           const na = nodes[e.fish_a_id]?.name ?? "?"
@@ -550,7 +577,7 @@ function RelationshipSection() {
               <span className={`text-label px-1.5 py-0.5 rounded border shrink-0 ${cls}`}>
                 {e.dominant_type}
               </span>
-              <span className="text-label text-muted-foreground tabular-nums shrink-0 w-5 text-right">{e.weight}</span>
+              <span className="text-label text-muted-foreground tabular-nums shrink-0 w-5 text-right" data-value>{e.weight}</span>
             </div>
           )
         })}
@@ -673,7 +700,14 @@ function IntelTab() {
   const predictions = usePredictionStore((s) => s.predictions).filter((p) => p.status === "active")
   const upsertPrediction = usePredictionStore((s) => s.upsertPrediction)
   const [resolving, setResolving] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const allClear = predictions.length === 0 && anomalies.length === 0
+
+  // Tick every minute to keep expiry bars + rate counts fresh
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   async function resolve(p: PredictionItem, outcome: "resolved_correct" | "resolved_incorrect") {
     setResolving(p.uuid)
@@ -682,48 +716,74 @@ function IntelTab() {
     finally { setResolving(null) }
   }
 
+  const recentCount = anomalies.filter((a) => now - new Date(a.started_at).getTime() < 3_600_000).length
+
   return (
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
       <WaterQualityAlert />
       <HealthCard />
       <RelationshipSection />
       <IncidentSection />
+
       <div>
         <SectionHeader label="Predictions" count={predictions.length} countColor="text-muted-foreground" />
         {predictions.length === 0 ? (
           <EmptyState message="none active" height="sm" />
-        ) : predictions.map((p) => (
-          <div key={p.uuid} className="px-3 py-2.5 border-t border-border/40 space-y-2 animate-in fade-in duration-300">
-            <div className="flex items-center justify-between">
-              <span className={`text-label px-1.5 py-0.5 rounded border ${PREDICTION_COLORS[p.prediction_type] ?? "text-zinc-400 border-border"}`}>
-                {p.prediction_type.replace(/_/g, " ")}
-              </span>
-              <span className="text-caption text-muted-foreground tabular-nums" data-value>{(p.confidence * 100).toFixed(0)}%</span>
-            </div>
-            <p className="text-detail text-muted-foreground leading-relaxed">{p.narrative}</p>
-            {p.involved_fish.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {p.involved_fish.map((f) => (
-                  <span key={f.fish_id} className="text-caption text-muted-foreground border border-border rounded px-1 py-0.5">{f.fish_name}</span>
-                ))}
+        ) : predictions.map((p) => {
+          const expiresMs   = new Date(p.expires_at).getTime()
+          const totalMs     = p.horizon_minutes * 60_000
+          const remaining   = Math.max(0, expiresMs - now)
+          const remainFrac  = remaining / totalMs
+          const minsLeft    = Math.round(remaining / 60_000)
+          const barColor    = remainFrac > 0.5 ? "bg-primary" : remainFrac > 0.25 ? "bg-amber-400" : "bg-rose-400"
+          return (
+            <div key={p.uuid} className="px-3 py-2.5 border-t border-border/40 space-y-2 animate-in fade-in duration-300">
+              <div className="flex items-center justify-between">
+                <span className={`text-label px-1.5 py-0.5 rounded border ${PREDICTION_COLORS[p.prediction_type] ?? "text-zinc-400 border-border"}`}>
+                  {p.prediction_type.replace(/_/g, " ")}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-label text-muted-foreground/60" data-value>{minsLeft}m</span>
+                  <span className="text-caption text-muted-foreground tabular-nums" data-value>{(p.confidence * 100).toFixed(0)}%</span>
+                </div>
               </div>
-            )}
-            <div className="flex gap-1.5">
-              <button disabled={resolving === p.uuid} onClick={() => resolve(p, "resolved_correct")}
-                className="text-label px-2 py-0.5 rounded border border-emerald-400/30 text-emerald-400 hover:bg-emerald-400/10 transition-colors disabled:opacity-40">
-                correct
-              </button>
-              <button disabled={resolving === p.uuid} onClick={() => resolve(p, "resolved_incorrect")}
-                className="text-label px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-rose-400/30 hover:text-rose-400 transition-colors disabled:opacity-40">
-                incorrect
-              </button>
+              {/* Expiry bar */}
+              <div className="h-px bg-muted overflow-hidden">
+                <div className={`h-full ${barColor} transition-all duration-1000`} style={{ width: `${remainFrac * 100}%` }} />
+              </div>
+              <p className="text-detail text-muted-foreground leading-relaxed">{p.narrative}</p>
+              {p.involved_fish.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {p.involved_fish.map((f) => (
+                    <span key={f.fish_id} className="text-caption text-muted-foreground border border-border rounded px-1 py-0.5">{f.fish_name}</span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-1.5">
+                <button disabled={resolving === p.uuid} onClick={() => resolve(p, "resolved_correct")}
+                  className="text-label px-2 py-0.5 rounded border border-emerald-400/30 text-emerald-400 hover:bg-emerald-400/10 transition-colors disabled:opacity-40">
+                  correct
+                </button>
+                <button disabled={resolving === p.uuid} onClick={() => resolve(p, "resolved_incorrect")}
+                  className="text-label px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-rose-400/30 hover:text-rose-400 transition-colors disabled:opacity-40">
+                  incorrect
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <div>
-        <SectionHeader label="Anomalies" count={anomalies.length} countColor="text-muted-foreground" />
+        <div className="px-3 py-2 border-b border-border/40 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-label text-muted-foreground">Anomalies</span>
+            {recentCount > 0 && (
+              <span className="text-label text-amber-400/80 border border-amber-400/20 rounded px-1 py-0.5">{recentCount}/hr</span>
+            )}
+          </div>
+          {anomalies.length > 0 && <span className="text-label text-muted-foreground" data-value>{anomalies.length}</span>}
+        </div>
         {anomalies.length === 0 ? (
           allClear ? (
             <div className="flex flex-col items-center justify-center h-20 gap-1 text-muted-foreground">
@@ -753,8 +813,11 @@ function IntelTab() {
                   <span className="text-caption text-muted-foreground">{formatDistanceToNow(a.started_at)} ago</span>
                 </div>
               </div>
+              {a.description && (
+                <p className="text-caption text-muted-foreground/80 leading-snug mb-1">{a.description}</p>
+              )}
               {a.involved_fish.length > 0 && (
-                <div className="flex gap-1 flex-wrap mt-1">
+                <div className="flex gap-1 flex-wrap">
                   {a.involved_fish.map((f: any) => (
                     <span key={f.fish_id} className="text-caption text-muted-foreground">{f.fish_name}</span>
                   ))}
