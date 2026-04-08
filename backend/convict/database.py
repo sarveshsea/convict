@@ -53,3 +53,8 @@ async def init_db():
                 await conn.execute(text(ddl))
             except Exception:
                 pass  # column already exists
+        for idx_ddl in [
+            "CREATE INDEX IF NOT EXISTS ix_behavior_events_tank_occurred_at ON behavior_events (tank_id, occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_interaction_edges_pair_type_time ON interaction_edges (fish_a_id, fish_b_id, interaction_type, occurred_at)",
+        ]:
+            await conn.execute(text(idx_ddl))
