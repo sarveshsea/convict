@@ -127,21 +127,39 @@ async def get_relationships(
         select(KnownFish).where(KnownFish.is_active == True)
     )).scalars().all()
 
-    # Aggregate: (fish_a_uuid, fish_b_uuid) → counts by type
-    pair_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # Aggregate: (fish_a_uuid, fish_b_uuid) → counts by type + initiator counts
+    pair_counts:    dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # initiator_counts[pair_key][fish_uuid] = how many times that fish initiated
+    initiator_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
     for e in edge_rows:
         fa = fish_by_id.get(e.fish_a_id)
         fb = fish_by_id.get(e.fish_b_id)
         if not fa or not fb:
             continue
-        # Canonical order by uuid string for consistent keys
         key = (fa.uuid, fb.uuid) if fa.uuid < fb.uuid else (fb.uuid, fa.uuid)
         pair_counts[key][e.interaction_type] += 1
 
+        # Track which fish initiated (if known)
+        if e.initiator_id:
+            fi = fish_by_id.get(e.initiator_id)
+            if fi:
+                initiator_counts[key][fi.uuid] += 1
+
     edges = []
     for (uuid_a, uuid_b), counts in pair_counts.items():
-        total = sum(counts.values())
+        total    = sum(counts.values())
         dominant = max(counts, key=lambda t: (_TYPE_PRIORITY.get(t, 0), counts[t]))
+
+        # Dominance: fraction of known-initiator interactions started by fish_a
+        init = initiator_counts.get((uuid_a, uuid_b), {})
+        total_inits = sum(init.values())
+        if total_inits > 0:
+            # positive = uuid_a more dominant, negative = uuid_b more dominant
+            dominance = round((init.get(uuid_a, 0) - init.get(uuid_b, 0)) / total_inits, 2)
+        else:
+            dominance = 0.0   # unknown
+
         edges.append({
             "fish_a_id":        uuid_a,
             "fish_b_id":        uuid_b,
@@ -150,6 +168,10 @@ async def get_relationships(
             "harassment_count": counts.get("harassment", 0),
             "proximity_count":  counts.get("proximity", 0),
             "schooling_count":  counts.get("schooling", 0),
+            # dominance > 0 means fish_a is more often the initiator
+            # dominance < 0 means fish_b is more often the initiator
+            # dominance = 0 means unknown or balanced
+            "dominance":        dominance,
         })
 
     # Sort edges: most interactions first

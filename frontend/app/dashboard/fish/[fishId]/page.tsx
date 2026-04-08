@@ -31,36 +31,36 @@ const TABS: { id: Tab; label: string }[] = [
 // ── Behavioral fingerprint derived from baseline + interaction data ──────────
 
 interface Fingerprint {
-  peakHour: number | null          // hour of day with most activity
-  topPartner: string | null        // name of most-interacted fish
-  topPartnerType: string | null    // dominant interaction type with top partner
+  peakHour: number | null
+  topPartnerType: string | null
   role: "aggressor" | "passive" | "social" | "loner" | null
-  dominantZoneId: string | null    // zone uuid with highest fraction
+  dominantZoneId: string | null
+  // dominance: positive = this fish initiates more, negative = partner initiates more
+  dominanceScore: number | null
 }
 
 function deriveFingerprint(
   baseline: FishSummary["baseline"],
-  edges: { fish_a_id: string; fish_b_id: string; weight: number; dominant_type: string; harassment_count: number }[],
+  edges: { fish_a_id: string; fish_b_id: string; weight: number; dominant_type: string; dominance?: number }[],
   fishUuid: string,
-  zones: { uuid: string; name: string }[],
 ): Fingerprint {
-  // Peak hour
   const byHour = baseline?.activity_by_hour ?? {}
   const hourEntries = Object.entries(byHour).map(([h, c]) => [parseInt(h), c as number] as const)
   const peakHour = hourEntries.length > 0
     ? hourEntries.reduce((a, b) => b[1] > a[1] ? b : a)[0]
     : null
 
-  // Top partner from edges
   const mine = edges.filter((e) => e.fish_a_id === fishUuid || e.fish_b_id === fishUuid)
-  const top  = mine.sort((a, b) => b.weight - a.weight)[0]
-  const topPartner     = top ? null : null   // resolved below in component with nodeNames
+  const top  = [...mine].sort((a, b) => b.weight - a.weight)[0]
   const topPartnerType = top?.dominant_type ?? null
 
-  // Role: aggressor if harassment edges are mostly initiated by this fish
-  //       social if schooling edges exist
-  //       loner if no edges at all
-  //       passive otherwise
+  // Dominance: from top partner edge, adjusted for perspective of this fish
+  let dominanceScore: number | null = null
+  if (top && top.dominance !== undefined && top.dominance !== 0) {
+    // dominance field: positive = fish_a more dominant. Flip if this fish is fish_b.
+    dominanceScore = top.fish_a_id === fishUuid ? top.dominance : -top.dominance
+  }
+
   const harassmentEdges = mine.filter((e) => e.dominant_type === "harassment")
   const schoolingEdges  = mine.filter((e) => e.dominant_type === "schooling")
   let role: Fingerprint["role"] = null
@@ -69,17 +69,17 @@ function deriveFingerprint(
   } else if (schoolingEdges.length >= harassmentEdges.length && schoolingEdges.length > 0) {
     role = "social"
   } else if (harassmentEdges.length > 0) {
-    role = "aggressor"
+    // use dominance to distinguish aggressor vs target
+    role = dominanceScore !== null && dominanceScore < -0.2 ? "passive" : "aggressor"
   } else {
     role = "passive"
   }
 
-  // Dominant zone
   const zoneFracs = baseline?.zone_time_fractions ?? {}
   const topZone = Object.entries(zoneFracs).sort((a, b) => (b[1] as number) - (a[1] as number))[0]
   const dominantZoneId = topZone ? topZone[0] : null
 
-  return { peakHour, topPartner, topPartnerType, role, dominantZoneId }
+  return { peakHour, topPartnerType, role, dominantZoneId, dominanceScore }
 }
 
 const ROLE_STYLE: Record<string, string> = {
@@ -166,7 +166,7 @@ export default function FishDrilldown() {
   const speciesGuessConf  = fish.species_guess_confidence ?? null
 
   // Behavioral fingerprint
-  const fp = deriveFingerprint(baseline, relEdges, fish.uuid, zones)
+  const fp = deriveFingerprint(baseline, relEdges, fish.uuid)
 
   // Top partner name (needs nodeNames)
   const topEdge        = relEdges.sort((a, b) => b.weight - a.weight)[0]
@@ -248,8 +248,10 @@ export default function FishDrilldown() {
               <div className="rounded border border-border/40 bg-card px-2.5 py-2">
                 <p className="text-label text-muted-foreground">Most With</p>
                 <p className="text-caption font-medium mt-0.5 truncate">{topPartnerName}</p>
-                {topEdge?.dominant_type && (
-                  <p className="text-label text-muted-foreground capitalize">{topEdge.dominant_type}</p>
+                {fp.dominanceScore !== null && (
+                  <p className={`text-label mt-0.5 ${fp.dominanceScore > 0.2 ? "text-rose-400" : fp.dominanceScore < -0.2 ? "text-blue-400" : "text-muted-foreground"}`}>
+                    {fp.dominanceScore > 0.2 ? "initiates" : fp.dominanceScore < -0.2 ? "submissive" : "balanced"}
+                  </p>
                 )}
               </div>
             )}
