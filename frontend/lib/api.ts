@@ -75,6 +75,8 @@ export const getCommunityHealth = (limit = 48) =>
   )
 export const getRelationships = (hours = 24) =>
   request<{ nodes: any[]; edges: any[]; window_hours: number }>(`/api/v1/intelligence/relationships?hours=${hours}`)
+export const getIncidents = (hours = 48, limit = 20) =>
+  request<any[]>(`/api/v1/intelligence/incidents?hours=${hours}&limit=${limit}`)
 
 // ---- Tank config (3D placement) ----
 export const getTankConfig = () => request<TankConfig>("/api/v1/tank-config")

@@ -7,7 +7,7 @@ import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useAuthStore, useIsAuthed } from "@/store/authStore"
-import { createFish, deleteFish, resolvePrediction, getRelationships } from "@/lib/api"
+import { createFish, deleteFish, resolvePrediction, getRelationships, getIncidents } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import { fishSnapshotUrl, TEMP_COLOR, PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
 import { ConfidenceBar } from "@/components/ui/confidence-bar"
@@ -548,6 +548,74 @@ function RelationshipSection() {
   )
 }
 
+// ─── Incident Section ─────────────────────────────────────────────────────────
+
+const SEV_STYLE: Record<string, string> = {
+  high:   "border-rose-400/40 text-rose-400",
+  medium: "border-amber-400/40 text-amber-400",
+  low:    "border-zinc-500/40 text-zinc-400",
+}
+const CHAIN_DOTS: Record<string, string> = {
+  harassment:   "bg-rose-400",
+  lethargy:     "bg-blue-400",
+  hyperactivity:"bg-amber-400",
+  missing_fish: "bg-zinc-400",
+  hiding:       "bg-indigo-400",
+}
+
+function IncidentSection() {
+  const [incidents, setIncidents] = useState<any[]>([])
+  const [loading, setLoading]     = useState(true)
+
+  useEffect(() => {
+    getIncidents(48, 8)
+      .then(setIncidents)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return null
+  if (incidents.length === 0) return null  // no incidents = don't clutter the tab
+
+  return (
+    <div>
+      <SectionHeader label="Incidents" count={incidents.length} countColor="text-muted-foreground" />
+      <div className="divide-y divide-border/30">
+        {incidents.map((inc, i) => {
+          const dur = inc.duration_seconds > 60
+            ? `${Math.round(inc.duration_seconds / 60)}m`
+            : `${Math.round(inc.duration_seconds)}s`
+          const unique = [...new Set<string>(inc.chain)]
+
+          return (
+            <div key={i} className="px-3 py-2.5 space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-caption text-foreground leading-snug flex-1">{inc.narrative}</p>
+                <span className={`text-label px-1 py-0.5 rounded border shrink-0 ${SEV_STYLE[inc.severity] ?? "border-border text-muted-foreground"}`}>
+                  {inc.severity}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Event chain dots */}
+                <div className="flex items-center gap-0.5">
+                  {inc.chain.slice(0, 8).map((t: string, j: number) => (
+                    <div key={j} className={`w-1.5 h-1.5 rounded-full ${CHAIN_DOTS[t] ?? "bg-zinc-500"}`} title={t} />
+                  ))}
+                  {inc.chain.length > 8 && <span className="text-label text-muted-foreground">+{inc.chain.length - 8}</span>}
+                </div>
+                <span className="text-label text-muted-foreground">
+                  {unique.join(" → ")}
+                </span>
+                <span className="text-label text-muted-foreground ml-auto">{dur}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Intel Tab ────────────────────────────────────────────────────────────────
 
 function IntelTab() {
@@ -568,6 +636,7 @@ function IntelTab() {
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
       <HealthCard />
       <RelationshipSection />
+      <IncidentSection />
       <div>
         <SectionHeader label="Predictions" count={predictions.length} countColor="text-muted-foreground" />
         {predictions.length === 0 ? (
