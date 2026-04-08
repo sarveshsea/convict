@@ -41,10 +41,15 @@ function HalftoneCanvas() {
         for (let r = 0; r < rows; r++) {
           const x = c * GAP
           const y = r * GAP
-          const v = Math.sin(c * 0.32 + t)             * Math.cos(r * 0.32 + t * 0.65)
-                  + Math.sin((c + r) * 0.18 - t * 0.85) * 0.9
-                  + Math.cos(c * 0.12 - r * 0.18 + t * 1.4) * 0.5
-          const raw = Math.max(0, Math.min(1, (v + 2.4) / 4.8))
+          // Stable per-cell phase offset — breaks grid regularity
+          const ph = (Math.sin(c * 127.1 + r * 311.7) * 43758.5453) % (Math.PI * 2)
+          // Many waves at irrational frequency ratios — never visibly repeating
+          const v = Math.sin(c * 0.31 + t * 1.00 + ph * 0.4)
+                  * Math.cos(r * 0.29 + t * 0.71 + ph * 0.3)
+                  + Math.sin(c * 0.17 + r * 0.23 + t * 1.37 + ph * 0.6) * 0.8
+                  + Math.cos(c * 0.41 - r * 0.37 + t * 0.83 + ph * 0.2) * 0.55
+                  + Math.sin(c * 0.13 + r * 0.19 - t * 1.61 + ph * 0.5) * 0.35
+          const raw = Math.max(0, Math.min(1, (v + 2.7) / 5.4))
           const n   = raw * raw
           if (n < 0.04) continue
           ctx.beginPath()
