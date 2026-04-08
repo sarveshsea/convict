@@ -1,98 +1,115 @@
 "use client"
 import { useEffect, useRef } from "react"
+import { CANVAS_COLORS } from "@/lib/constants"
+import { EmptyState } from "@/components/ui/empty-state"
 import type { ConfidencePoint } from "@/lib/api"
 
 interface Props { history: ConfidencePoint[] }
 
-export function IdentityConfidenceChart({ history }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+export function SpeedHistoryChart({ history }: Props) {
+  const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  function draw() {
     const canvas = canvasRef.current
     if (!canvas || history.length === 0) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    const W  = canvas.width
-    const H  = canvas.height
-    const padL = 28, padR = 8, padT = 8, padB = 16
+    const dpr  = window.devicePixelRatio || 1
+    const rect = canvas.getBoundingClientRect()
+    canvas.width  = rect.width  * dpr
+    canvas.height = rect.height * dpr
+    ctx.scale(dpr, dpr)
+
+    const W = rect.width, H = rect.height
+    const padL = 32, padR = 8, padT = 8, padB = 18
     const cW = W - padL - padR
     const cH = H - padT - padB
 
-    ctx.fillStyle = "#0d0d10"
+    ctx.fillStyle = CANVAS_COLORS.bg
     ctx.fillRect(0, 0, W, H)
 
-    // Grid lines
-    ctx.strokeStyle = "rgba(63,63,70,0.5)"
-    ctx.lineWidth   = 0.5
-    for (let i = 0; i <= 4; i++) {
-      const y = padT + (cH * (1 - i / 4))
-      ctx.beginPath()
-      ctx.moveTo(padL, y)
-      ctx.lineTo(padL + cW, y)
-      ctx.stroke()
-      ctx.fillStyle = "#52525b"
-      ctx.font = "7px 'Fira Code', monospace"
+    const speeds = history.map((h) => h.mean_speed)
+    const maxVal = Math.max(...speeds, 0.1)
+    const meanSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length
+
+    // Grid lines + Y-axis labels (actual speed values)
+    const steps = 4
+    for (let i = 0; i <= steps; i++) {
+      const y     = padT + cH * (1 - i / steps)
+      const label = ((maxVal * i) / steps).toFixed(1)
+      ctx.strokeStyle = CANVAS_COLORS.grid
+      ctx.lineWidth   = 0.5
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + cW, y); ctx.stroke()
+      ctx.fillStyle = CANVAS_COLORS.text
+      ctx.font      = `7px 'Fira Code', monospace`
       ctx.textAlign = "right"
-      ctx.fillText(`${(i * 25)}%`, padL - 3, y + 3)
+      ctx.fillText(label, padL - 3, y + 3)
     }
 
-    // Use mean_speed as a proxy for observation density (no per-frame confidence stored in DB)
-    const values = history.map((h) => Math.min(h.mean_speed / 10, 1))  // normalise
-    const n      = values.length
+    const n     = history.length
+    const stepX = n > 1 ? cW / (n - 1) : cW
+
+    // Mean reference line
+    if (n > 1) {
+      const meanY = padT + cH * (1 - meanSpeed / maxVal)
+      ctx.save()
+      ctx.setLineDash([3, 4])
+      ctx.strokeStyle = CANVAS_COLORS.muted
+      ctx.lineWidth   = 1
+      ctx.beginPath(); ctx.moveTo(padL, meanY); ctx.lineTo(padL + cW, meanY); ctx.stroke()
+      ctx.restore()
+    }
+
     if (n < 2) return
 
-    const stepX = cW / (n - 1)
+    const points = speeds.map((v, i) => ({
+      x: padL + i * stepX,
+      y: padT + cH * (1 - v / maxVal),
+    }))
 
     // Area fill
     ctx.beginPath()
-    ctx.moveTo(padL, padT + cH)
-    values.forEach((v, i) => {
-      const x = padL + i * stepX
-      const y = padT + cH * (1 - v)
-      i === 0 ? ctx.lineTo(x, y) : ctx.lineTo(x, y)
-    })
-    ctx.lineTo(padL + (n - 1) * stepX, padT + cH)
+    ctx.moveTo(points[0].x, padT + cH)
+    points.forEach((p) => ctx.lineTo(p.x, p.y))
+    ctx.lineTo(points[n - 1].x, padT + cH)
     ctx.closePath()
-    ctx.fillStyle = "rgba(96, 165, 250, 0.10)"
+    ctx.fillStyle = CANVAS_COLORS.fill
     ctx.fill()
 
     // Line
     ctx.beginPath()
-    values.forEach((v, i) => {
-      const x = padL + i * stepX
-      const y = padT + cH * (1 - v)
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-    })
-    ctx.strokeStyle = "rgba(96, 165, 250, 0.85)"
+    points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y))
+    ctx.strokeStyle = CANVAS_COLORS.primary
     ctx.lineWidth   = 1.5
     ctx.stroke()
+  }
 
+  useEffect(() => {
+    draw()
+    const ro = new ResizeObserver(draw)
+    if (containerRef.current) ro.observe(containerRef.current)
+    return () => ro.disconnect()
   }, [history])
 
   if (history.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-24 text-[10px] font-mono text-muted-foreground">
-        no observation history yet
-      </div>
-    )
+    return <EmptyState message="no speed history yet" height="lg" />
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
-        Observation Activity (baseline snapshots)
-      </p>
+    <div className="space-y-2" ref={containerRef}>
+      <p className="text-label text-muted-foreground">Speed History (px/frame)</p>
       <canvas
         ref={canvasRef}
-        width={400}
-        height={100}
-        className="w-full rounded border border-border/40"
-        style={{ imageRendering: "pixelated" }}
+        className="w-full h-24 rounded border border-border/40"
       />
-      <p className="text-[8px] font-mono text-muted-foreground">
-        {history.length} baseline snapshot{history.length !== 1 ? "s" : ""} recorded
+      <p className="text-label text-muted-foreground" data-value>
+        {history.length} baseline snapshot{history.length !== 1 ? "s" : ""} · dashed line = mean
       </p>
     </div>
   )
 }
+
+// Keep old export name as alias for the drilldown page which imports it
+export { SpeedHistoryChart as IdentityConfidenceChart }

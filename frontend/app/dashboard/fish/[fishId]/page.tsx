@@ -8,41 +8,39 @@ import {
   type FishSummary, type BehaviorEvent, type ConfidencePoint,
 } from "@/lib/api"
 import { useTankStore } from "@/store/tankStore"
+import { useObservationStore } from "@/store/observationStore"
+import { TEMP_TEXT_COLOR } from "@/lib/constants"
+import { ConfidenceBar } from "@/components/ui/confidence-bar"
 import { ZoneHeatmap } from "@/components/drilldown/ZoneHeatmap"
 import { InteractionHistory } from "@/components/drilldown/InteractionHistory"
 import { BehaviorBaseline } from "@/components/drilldown/BehaviorBaseline"
 import { IdentityConfidenceChart } from "@/components/drilldown/IdentityConfidenceChart"
 import { EvidenceChain } from "@/components/drilldown/EvidenceChain"
 
-type Tab = "heatmap" | "interactions" | "baseline" | "confidence" | "evidence"
+type Tab = "heatmap" | "interactions" | "baseline" | "speed" | "evidence"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "heatmap",      label: "Zone Heatmap" },
   { id: "baseline",     label: "Baseline" },
   { id: "interactions", label: "Interactions" },
-  { id: "confidence",   label: "Activity" },
+  { id: "speed",        label: "Speed History" },
   { id: "evidence",     label: "Evidence Chain" },
 ]
-
-const TEMP_STYLE: Record<string, string> = {
-  aggressive:       "text-rose-400 border-rose-400/30 bg-rose-400/5",
-  "semi-aggressive":"text-amber-400 border-amber-400/30 bg-amber-400/5",
-  peaceful:         "text-blue-400 border-blue-400/30 bg-blue-400/5",
-}
 
 export default function FishDrilldown() {
   const params  = useParams()
   const router  = useRouter()
   const fishId  = params.fishId as string
   const zones   = useTankStore((s) => s.zones)
+  const entities = useObservationStore((s) => s.entities)
 
-  const [tab,      setTab]      = useState<Tab>("heatmap")
-  const [summary,  setSummary]  = useState<FishSummary | null>(null)
-  const [heatmap,  setHeatmap]  = useState<Record<string, number>>({})
-  const [events,   setEvents]   = useState<BehaviorEvent[]>([])
-  const [history,  setHistory]  = useState<ConfidencePoint[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState<string | null>(null)
+  const [tab,     setTab]     = useState<Tab>("heatmap")
+  const [summary, setSummary] = useState<FishSummary | null>(null)
+  const [heatmap, setHeatmap] = useState<Record<string, number>>({})
+  const [events,  setEvents]  = useState<BehaviorEvent[]>([])
+  const [history, setHistory] = useState<ConfidencePoint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -68,7 +66,7 @@ export default function FishDrilldown() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen text-[10px] font-mono text-muted-foreground">
+      <div className="flex items-center justify-center h-screen text-caption text-muted-foreground">
         <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse mr-2" />
         loading…
       </div>
@@ -78,8 +76,8 @@ export default function FishDrilldown() {
   if (error || !summary) {
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-3">
-        <p className="text-[11px] font-mono text-destructive">{error ?? "Fish not found"}</p>
-        <Link href="/dashboard" className="text-[10px] font-mono text-muted-foreground hover:text-foreground">
+        <p className="text-detail font-mono text-destructive">{error ?? "Fish not found"}</p>
+        <Link href="/dashboard" className="text-caption text-muted-foreground hover:text-foreground">
           ← back to dashboard
         </Link>
       </div>
@@ -88,39 +86,62 @@ export default function FishDrilldown() {
 
   const { fish, baseline } = summary
 
+  // Check if currently tracked
+  const liveEntity   = entities.find((e) => e.identity?.fish_id === fish.uuid)
+  const isTracked    = !!liveEntity
+  const liveConf     = liveEntity?.identity?.confidence ?? 0
+  const speciesGuessConf = fish.species_guess_confidence ?? null
+
   return (
     <div className="min-h-screen bg-background text-foreground p-6 max-w-2xl mx-auto">
       {/* Header */}
       <div className="mb-6">
         <Link
           href="/dashboard"
-          className="text-[9px] font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest block mb-4"
+          className="text-label text-muted-foreground hover:text-foreground block mb-4"
         >
           ← dashboard
         </Link>
 
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-medium tracking-tight">{fish.name}</h1>
-            <p className="text-[11px] text-muted-foreground italic mt-0.5">{fish.species}</p>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <h1 className="text-xl font-medium tracking-tight">{fish.name}</h1>
+              {isTracked && (
+                <span className="text-label text-emerald-400 border border-emerald-400/30 bg-emerald-400/10 rounded px-1.5 py-0.5">
+                  tracking
+                </span>
+              )}
+            </div>
+            <p className="text-caption text-muted-foreground italic">{fish.species}</p>
+            {speciesGuessConf !== null && (
+              <ConfidenceBar value={speciesGuessConf} className="mt-1 max-w-48" />
+            )}
           </div>
-          <div className="flex items-center gap-2 shrink-0 pt-1">
-            <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border ${TEMP_STYLE[fish.temperament]}`}>
+          <div className="flex items-center gap-2 shrink-0 pt-1 flex-wrap justify-end">
+            <span className={`text-label px-1.5 py-0.5 rounded border ${TEMP_TEXT_COLOR[fish.temperament] ?? "text-muted-foreground border-border"}`}>
               {fish.temperament}
             </span>
-            <span className="text-[9px] font-mono text-muted-foreground border border-border rounded px-1.5 py-0.5">
+            <span className="text-label text-muted-foreground border border-border rounded px-1.5 py-0.5" data-value>
               {fish.size_class}
             </span>
             {fish.estimated_length_cm && (
-              <span className="text-[9px] font-mono text-muted-foreground">
+              <span className="text-label text-muted-foreground" data-value>
                 {fish.estimated_length_cm}cm
               </span>
             )}
           </div>
         </div>
 
+        {isTracked && liveConf > 0 && (
+          <div className="mt-2">
+            <p className="text-label text-muted-foreground mb-1">Live Confidence</p>
+            <ConfidenceBar value={liveConf} className="max-w-48" />
+          </div>
+        )}
+
         {fish.appearance_notes && (
-          <p className="text-[10px] text-muted-foreground mt-1">{fish.appearance_notes}</p>
+          <p className="text-caption text-muted-foreground mt-2">{fish.appearance_notes}</p>
         )}
       </div>
 
@@ -130,7 +151,7 @@ export default function FishDrilldown() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-[10px] font-mono whitespace-nowrap border-b-2 transition-colors -mb-px
+            className={`px-3 py-2 text-caption whitespace-nowrap border-b-2 transition-colors -mb-px
               ${tab === t.id
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"}`}
@@ -145,7 +166,7 @@ export default function FishDrilldown() {
         {tab === "heatmap"      && <ZoneHeatmap zoneTimeFractions={heatmap} zones={zones} />}
         {tab === "baseline"     && <BehaviorBaseline baseline={baseline} />}
         {tab === "interactions" && <InteractionHistory events={events} />}
-        {tab === "confidence"   && <IdentityConfidenceChart history={history} />}
+        {tab === "speed"        && <IdentityConfidenceChart history={history} />}
         {tab === "evidence"     && <EvidenceChain fishUuid={fish.uuid} fishName={fish.name} />}
       </div>
     </div>
