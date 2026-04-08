@@ -15,7 +15,7 @@ function HalftoneCanvas() {
     const ctx = canvas.getContext("2d")!
     const dpr = window.devicePixelRatio || 1
     let W = 0, H = 0, raf = 0, t = 0, scanY = 0
-    const GAP = 11
+    const GAP = 7
 
     const resize = () => {
       const w = canvas.offsetWidth
@@ -81,20 +81,24 @@ function HalftoneCanvas() {
         }
       }
 
-      // Scan line — slow horizontal sweep (18s period)
+      // Scan line — slow horizontal sweep (~18s period)
       scanY = (scanY + 1.8) % H
       const sy = Math.floor(scanY)
       const grad = ctx.createLinearGradient(0, 0, W, 0)
-      grad.addColorStop(0,   "rgba(100,150,255,0)")
-      grad.addColorStop(0.3, "rgba(100,150,255,0.18)")
-      grad.addColorStop(0.7, "rgba(100,150,255,0.18)")
-      grad.addColorStop(1,   "rgba(100,150,255,0)")
+      grad.addColorStop(0,   "rgba(255,255,255,0)")
+      grad.addColorStop(0.2, "rgba(255,255,255,0.7)")
+      grad.addColorStop(0.5, "rgba(255,255,255,0.9)")
+      grad.addColorStop(0.8, "rgba(255,255,255,0.7)")
+      grad.addColorStop(1,   "rgba(255,255,255,0)")
       ctx.fillStyle = grad
       ctx.fillRect(0, sy, W, 1)
-      // Soft glow 2px above/below
-      ctx.fillStyle = "rgba(100,150,255,0.06)"
+      // Soft glow above/below
+      ctx.fillStyle = "rgba(255,255,255,0.18)"
       ctx.fillRect(0, sy - 1, W, 1)
       ctx.fillRect(0, sy + 1, W, 1)
+      ctx.fillStyle = "rgba(255,255,255,0.05)"
+      ctx.fillRect(0, sy - 2, W, 1)
+      ctx.fillRect(0, sy + 2, W, 1)
       raf = requestAnimationFrame(draw)
     }
 
@@ -456,9 +460,140 @@ function getCoverBox(fw: number, fh: number, cw: number, ch: number): Letterbox 
   }
 }
 
-// Single camera pane — handles its own img + optional overlay canvas
+// ─── HLS video player ─────────────────────────────────────────────────────────
+//
+// Rendering priority:
+//   1. Native HLS  — Safari supports <video src="*.m3u8"> directly.
+//   2. hls.js      — all other browsers, loaded dynamically so the page builds
+//                    even when the hls.js package is not yet installed.
+//   3. MJPEG <img> — fallback when hls.js fails to load (package not installed)
+//                    or when the HLS playlist returns a non-200 status.
+//
+// To enable hls.js: run `npm install hls.js` and `npm install --save-dev @types/hls.js`
+// in the frontend directory.  No code changes are required — the dynamic import
+// below will pick it up automatically.
+//
+function HlsVideoPlayer({
+  hlsSrc,
+  mjpegSrc,
+  label,
+  onStatusChange,
+}: {
+  hlsSrc: string
+  mjpegSrc: string
+  label: string
+  onStatusChange: (ok: boolean) => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  // null = probing, true = HLS active, false = falling back to MJPEG
+  const [hlsMode, setHlsMode] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    let destroyed = false
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let hlsInstance: any = null
+
+    // Safari / iOS: native HLS support
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = hlsSrc
+      video.play().catch(() => {/* autoplay may be blocked; user gesture required */})
+      setHlsMode(true)
+      onStatusChange(true)
+      return
+    }
+
+    // Other browsers: try hls.js via dynamic import
+    import("hls.js")
+      .then((mod) => {
+        if (destroyed) return
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const Hls = (mod as any).default ?? mod
+
+        if (!Hls.isSupported()) {
+          // MSE not available — fall back to MJPEG
+          setHlsMode(false)
+          onStatusChange(false)
+          return
+        }
+
+        hlsInstance = new Hls({
+          lowLatencyMode: true,
+          backBufferLength: 2,
+          maxBufferLength: 5,
+        })
+
+        hlsInstance.loadSource(hlsSrc)
+        hlsInstance.attachMedia(video)
+
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (destroyed) return
+          setHlsMode(true)
+          onStatusChange(true)
+          video.play().catch(() => {/* autoplay may be blocked */})
+        })
+
+        hlsInstance.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean }) => {
+          if (destroyed) return
+          if (data.fatal) {
+            setHlsMode(false)
+            onStatusChange(false)
+          }
+        })
+      })
+      .catch(() => {
+        // hls.js package not installed — fall back to MJPEG
+        if (!destroyed) {
+          setHlsMode(false)
+          onStatusChange(false)
+        }
+      })
+
+    return () => {
+      destroyed = true
+      if (hlsInstance) {
+        hlsInstance.destroy()
+        hlsInstance = null
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hlsSrc])
+
+  // Probe phase: render video element (Safari needs it in DOM before we set src)
+  // MJPEG fallback: render the <img> instead
+  if (hlsMode === false) {
+    return (
+      <img
+        src={mjpegSrc}
+        alt={label}
+        className="absolute inset-0 h-full w-full object-contain [image-rendering:auto]"
+        onLoad={() => onStatusChange(true)}
+        onError={() => onStatusChange(false)}
+      />
+    )
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      className="absolute inset-0 h-full w-full object-contain"
+      muted
+      autoPlay
+      playsInline
+      onError={() => {
+        setHlsMode(false)
+        onStatusChange(false)
+      }}
+    />
+  )
+}
+
+// Single camera pane — handles its own img/video + optional overlay canvas
 function CameraPane({
   src,
+  hlsSrc,
   label,
   entities,
   frameWidth,
@@ -466,8 +601,10 @@ function CameraPane({
   frameSeq,
   nightMode,
   pipelineActive,
+  useHls,
 }: {
   src: string
+  hlsSrc: string
   label: string
   entities: LiveEntity[]
   frameWidth: number
@@ -475,6 +612,7 @@ function CameraPane({
   frameSeq: number
   nightMode: boolean
   pipelineActive: boolean
+  useHls: boolean
 }) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const canvasRef     = useRef<HTMLCanvasElement>(null)
@@ -541,20 +679,32 @@ function CameraPane({
       ref={containerRef}
       className="relative flex-1 overflow-hidden bg-zinc-950 [box-shadow:inset_0_0_80px_rgba(0,0,0,0.45)]"
     >
-      <img
-        key={src}
-        src={src}
-        alt={label}
-        className="absolute inset-0 h-full w-full object-contain [image-rendering:auto]"
-        onLoad={() => {
-          setStreamOk(true)
-          retryDelay.current = 2000
-        }}
-        onError={() => {
-          setStreamOk(false)
-          scheduleRetry()
-        }}
-      />
+      {useHls ? (
+        <HlsVideoPlayer
+          hlsSrc={hlsSrc}
+          mjpegSrc={src}
+          label={label}
+          onStatusChange={(ok) => {
+            setStreamOk(ok)
+            if (ok) retryDelay.current = 2000
+          }}
+        />
+      ) : (
+        <img
+          key={src}
+          src={src}
+          alt={label}
+          className="absolute inset-0 h-full w-full object-contain [image-rendering:auto]"
+          onLoad={() => {
+            setStreamOk(true)
+            retryDelay.current = 2000
+          }}
+          onError={() => {
+            setStreamOk(false)
+            scheduleRetry()
+          }}
+        />
+      )}
 
       <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
 
@@ -597,6 +747,20 @@ export function LiveFeedCanvas() {
   const cam2FrameWidth  = useObservationStore((s) => s.cam2FrameWidth)
   const cam2FrameHeight = useObservationStore((s) => s.cam2FrameHeight)
 
+  // HLS mode toggle — persisted in sessionStorage so it survives soft navigation
+  const [useHls, setUseHls] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false
+    return sessionStorage.getItem("convict_stream_mode") === "hls"
+  })
+
+  function toggleStreamMode() {
+    setUseHls((prev) => {
+      const next = !prev
+      sessionStorage.setItem("convict_stream_mode", next ? "hls" : "mjpeg")
+      return next
+    })
+  }
+
   return (
     <div className="absolute inset-0 flex gap-px bg-border/20 p-px">
       {/* Offline: halftone canvas + status card */}
@@ -613,9 +777,11 @@ export function LiveFeedCanvas() {
           <ConnectingBar />
         </div>
       )}
+
       {/* Cam 1 — annotated detection feed */}
       <CameraPane
         src={STREAM_URL}
+        hlsSrc={HLS_URL}
         label="Cam 1"
         entities={entities}
         frameWidth={frameWidth}
@@ -623,6 +789,7 @@ export function LiveFeedCanvas() {
         frameSeq={frameSeq}
         nightMode={nightMode}
         pipelineActive={pipelineActive}
+        useHls={useHls}
       />
 
       {/* Cam 2 — only shown when backend confirms it's streaming */}
@@ -631,6 +798,7 @@ export function LiveFeedCanvas() {
           <div className="w-px shrink-0 bg-border/60" />
           <CameraPane
             src={STREAM_URL_2}
+            hlsSrc={HLS_URL_2}
             label="Cam 2"
             entities={cam2Entities}
             frameWidth={cam2FrameWidth}
@@ -638,9 +806,22 @@ export function LiveFeedCanvas() {
             frameSeq={frameSeq}
             nightMode={nightMode}
             pipelineActive={cam2Active}
+            useHls={useHls}
           />
         </>
       )}
+
+      {/* Stream mode toggle — bottom-left corner */}
+      <button
+        onClick={toggleStreamMode}
+        className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-950/80 px-2.5 py-1.5 shadow-lg backdrop-blur-md hover:bg-zinc-900/90 transition-colors"
+        title={useHls ? "Switch to MJPEG stream" : "Switch to HLS stream"}
+      >
+        <div className={`h-1.5 w-1.5 rounded-full ${useHls ? "bg-blue-400" : "bg-amber-400"}`} />
+        <span className="text-[10px] font-medium tracking-wider text-zinc-300">
+          {useHls ? "HLS" : "MJPEG"}
+        </span>
+      </button>
     </div>
   )
 }
