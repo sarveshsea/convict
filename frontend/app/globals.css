@@ -45,12 +45,14 @@
   --popover:           oklch(0.14 0.006 245);
   --surface:           oklch(0.15 0.007 245);
 
-  /* Text */
-  --foreground:        oklch(0.88 0.01 245);
-  --card-foreground:   oklch(0.88 0.01 245);
-  --popover-foreground: oklch(0.88 0.01 245);
+  /* Text — WCAG AA compliant on oklch(0.08) background */
+  /* foreground: pure white = 19:1 contrast ✓ */
+  /* muted-foreground: oklch(0.72) ≈ 9:1 contrast ✓ (was 0.50 ≈ 4.1:1 — failed AA) */
+  --foreground:        oklch(1.0 0 0);
+  --card-foreground:   oklch(1.0 0 0);
+  --popover-foreground: oklch(1.0 0 0);
   --muted:             oklch(0.20 0.006 245);
-  --muted-foreground:  oklch(0.50 0.01 245);
+  --muted-foreground:  oklch(0.72 0.01 245);
 
   /* Blue accent — electric steel blue */
   --primary:           oklch(0.62 0.20 245);
@@ -58,9 +60,9 @@
 
   /* Secondary / accent */
   --secondary:         oklch(0.20 0.008 245);
-  --secondary-foreground: oklch(0.88 0.01 245);
+  --secondary-foreground: oklch(1.0 0 0);
   --accent:            oklch(0.20 0.008 245);
-  --accent-foreground: oklch(0.88 0.01 245);
+  --accent-foreground: oklch(1.0 0 0);
 
   /* States */
   --destructive:       oklch(0.62 0.22 27);
@@ -72,18 +74,18 @@
   --status-healthy:    oklch(0.62 0.20 245);    /* blue — identified / normal */
   --status-warning:    oklch(0.78 0.16 75);     /* amber — medium confidence */
   --status-critical:   oklch(0.62 0.22 27);     /* rose — aggression / missing */
-  --status-unknown:    oklch(0.48 0.01 245);    /* dim — unresolved */
+  --status-unknown:    oklch(0.65 0.01 245);    /* unresolved — raised for WCAG AA */
 
   --radius: 0.25rem;
 
   --sidebar: oklch(0.12 0.006 245);
-  --sidebar-foreground: oklch(0.88 0.01 245);
+  --sidebar-foreground: oklch(1.0 0 0);
   --sidebar-border: oklch(0.22 0.008 245);
   --sidebar-ring: oklch(0.62 0.20 245);
   --sidebar-primary: oklch(0.62 0.20 245);
   --sidebar-primary-foreground: oklch(0.08 0.005 245);
   --sidebar-accent: oklch(0.20 0.008 245);
-  --sidebar-accent-foreground: oklch(0.88 0.01 245);
+  --sidebar-accent-foreground: oklch(1.0 0 0);
 }
 
 @layer base {
@@ -141,5 +143,5 @@
   .confidence-high  { color: oklch(0.62 0.20 245); }
   .confidence-mid   { color: oklch(0.78 0.16 75); }
   .confidence-low   { color: oklch(0.62 0.22 27); }
-  .confidence-none  { color: oklch(0.48 0.01 245); }
+  .confidence-none  { color: oklch(0.65 0.01 245); }
 }
