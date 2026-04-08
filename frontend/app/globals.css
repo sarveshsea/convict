@@ -76,7 +76,7 @@
   --status-critical:   oklch(0.62 0.22 27);     /* rose — aggression / missing */
   --status-unknown:    oklch(0.65 0.01 245);    /* unresolved — raised for WCAG AA */
 
-  --radius: 0.25rem;
+  --radius: 0.125rem;   /* 2px — sharper, tactical */
 
   --sidebar: oklch(0.12 0.006 245);
   --sidebar-foreground: oklch(1.0 0 0);
@@ -158,4 +158,63 @@
   .confidence-mid   { color: oklch(0.78 0.16 75); }
   .confidence-low   { color: oklch(0.62 0.22 27); }
   .confidence-none  { color: oklch(0.65 0.01 245); }
+
+  /* Data row — label › value layout used in status cards */
+  .data-row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-size: 9px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .data-row-label { color: oklch(0.72 0.01 245 / 0.45); min-width: 3.5rem; flex-shrink: 0; }
+  .data-row-sep   { color: oklch(0.72 0.01 245 / 0.3); }
+  .data-row-value { color: oklch(1.0 0 0 / 0.55); letter-spacing: 0.1em; }
+
+  /* Perforated divider */
+  .perf-line {
+    height: 1px;
+    background: repeating-linear-gradient(
+      to right,
+      oklch(0.22 0.008 245 / 0.4) 0px,
+      oklch(0.22 0.008 245 / 0.4) 3px,
+      transparent 3px,
+      transparent 6px
+    );
+  }
+}
+
+@layer components {
+  /* shadcn Card — remove default shadow, tighter padding */
+  .card {
+    border-radius: var(--radius);
+    border-color: oklch(0.22 0.008 245 / 0.5);
+    background: var(--card);
+    box-shadow: none;
+  }
+  .card-header  { padding: 0.75rem 1rem; border-bottom: 1px solid oklch(0.22 0.008 245 / 0.4); }
+  .card-content { padding: 0.75rem 1rem; }
+  .card-footer  { padding: 0.5rem 1rem; border-top: 1px solid oklch(0.22 0.008 245 / 0.4); }
+
+  /* shadcn Input */
+  .input {
+    border-radius: var(--radius);
+    background: var(--card);
+    border-color: oklch(0.22 0.008 245 / 0.6);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .input:focus { border-color: oklch(0.62 0.20 245 / 0.6); }
+
+  /* shadcn Button */
+  .button {
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    text-transform: uppercase;
+  }
 }
