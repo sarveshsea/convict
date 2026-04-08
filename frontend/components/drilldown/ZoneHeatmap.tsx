@@ -8,89 +8,13 @@ interface Props {
   zones: Zone[]
 }
 
-// ---------------------------------------------------------------------------
-// Inline worker source — runs in a dedicated thread via OffscreenCanvas.
-// Must be a self-contained string (no closure captures).
-// ---------------------------------------------------------------------------
-const WORKER_SOURCE = /* js */`
-self.onmessage = function(e) {
-  if (e.data.type !== "draw") return;
-  var d      = e.data.data;
-  var canvas = d.canvas;            // OffscreenCanvas transferred from main thread
-  var zones  = d.zones;             // serialised Zone[]
-  var fracs  = d.zoneTimeFractions; // Record<string, number>
-  var colors = d.colors;            // { bg, text }
-  var W      = d.W;
-  var H      = d.H;
-
-  var ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  ctx.fillStyle = colors.bg;
-  ctx.fillRect(0, 0, W, H);
-
-  if (zones.length === 0) {
-    ctx.fillStyle = colors.text;
-    ctx.font = "10px 'Fira Code', monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("no zones defined", W / 2, H / 2);
-    return;
-  }
-
-  var vals = Object.values(fracs);
-  var maxFrac = 0.01;
-  for (var vi = 0; vi < vals.length; vi++) { if (vals[vi] > maxFrac) maxFrac = vals[vi]; }
-
-  for (var zi = 0; zi < zones.length; zi++) {
-    var zone = zones[zi];
-    var x1 = zone.x_min * W;
-    var y1 = zone.y_min * H;
-    var x2 = zone.x_max * W;
-    var y2 = zone.y_max * H;
-    var frac = (fracs[zone.uuid] !== undefined) ? fracs[zone.uuid] : 0;
-
-    var t = frac / maxFrac;
-    var r, g, b;
-    if (t < 0.5) {
-      r = Math.round(30  + t * 2 * (251 - 30));
-      g = Math.round(100 + t * 2 * (191 - 100));
-      b = Math.round(200 + t * 2 * (36  - 200));
-    } else {
-      r = Math.round(251 + (t - 0.5) * 2 * (244 - 251));
-      g = Math.round(191 + (t - 0.5) * 2 * (63  - 191));
-      b = Math.round(36  + (t - 0.5) * 2 * (94  - 36));
-    }
-
-    ctx.fillStyle = "rgba(" + r + "," + g + "," + b + "," + (0.15 + t * 0.65) + ")";
-    ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-    ctx.strokeStyle = "rgba(" + r + "," + g + "," + b + ",0.6)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-
-    ctx.fillStyle = "rgba(" + r + "," + g + "," + b + ",0.9)";
-    ctx.font = (9 * (d.dpr || 1)) + "px 'Fira Code', monospace";
-    ctx.textAlign = "left";
-    ctx.fillText(zone.name, x1 + 4, y1 + 13);
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = (8 * (d.dpr || 1)) + "px 'Fira Code', monospace";
-    ctx.fillText(Math.round(frac * 100) + "%", x1 + 4, y1 + 24);
-  }
-};
-`
-
 export function ZoneHeatmap({ zoneTimeFractions, zones }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const zonesRef = useRef<{ zone: Zone; x1: number; y1: number; x2: number; y2: number }[]>([])
-  // Keep a reference to the current worker so we can terminate it on cleanup
-  const workerRef = useRef<Worker | null>(null)
 
-  // -------------------------------------------------------------------------
-  // Fallback: identical drawing logic executed on the main thread.
-  // Used when OffscreenCanvas / transferControlToOffscreen is not supported.
-  // -------------------------------------------------------------------------
-  function drawMainThread() {
+  function draw() {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext("2d")
@@ -155,93 +79,11 @@ export function ZoneHeatmap({ zoneTimeFractions, zones }: Props) {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Main draw dispatcher: tries OffscreenCanvas + Worker, falls back to main.
-  // -------------------------------------------------------------------------
-  function draw() {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const dpr  = window.devicePixelRatio || 1
-    const rect = canvas.getBoundingClientRect()
-
-    // Always keep zonesRef in sync so tooltip hit-testing works on main thread
-    zonesRef.current = zones.map((zone) => ({
-      zone,
-      x1: zone.x_min * rect.width,
-      y1: zone.y_min * rect.height,
-      x2: zone.x_max * rect.width,
-      y2: zone.y_max * rect.height,
-    }))
-
-    // Feature-detect OffscreenCanvas + transferControlToOffscreen
-    const supportsOffscreen =
-      typeof (canvas as HTMLCanvasElement & { transferControlToOffscreen?: () => OffscreenCanvas }).transferControlToOffscreen === "function"
-
-    if (supportsOffscreen) {
-      // Terminate any previously spawned worker before creating a new one
-      if (workerRef.current) {
-        workerRef.current.terminate()
-        workerRef.current = null
-      }
-
-      try {
-        canvas.width  = rect.width  * dpr
-        canvas.height = rect.height * dpr
-
-        const offscreen = (canvas as HTMLCanvasElement & { transferControlToOffscreen: () => OffscreenCanvas }).transferControlToOffscreen()
-        const blob   = new Blob([WORKER_SOURCE], { type: "application/javascript" })
-        const url    = URL.createObjectURL(blob)
-        const worker = new Worker(url)
-        workerRef.current = worker
-        URL.revokeObjectURL(url) // safe to revoke after Worker is created
-
-        // Serialise only the plain-data fields of Zone needed by the worker
-        const serialisedZones = zones.map((z) => ({
-          uuid: z.uuid,
-          name: z.name,
-          x_min: z.x_min,
-          y_min: z.y_min,
-          x_max: z.x_max,
-          y_max: z.y_max,
-        }))
-
-        worker.postMessage(
-          {
-            type: "draw",
-            data: {
-              canvas: offscreen,
-              zones: serialisedZones,
-              zoneTimeFractions,
-              colors: { bg: CANVAS_COLORS.bg, text: CANVAS_COLORS.text },
-              W: rect.width * dpr,
-              H: rect.height * dpr,
-              dpr,
-            },
-          },
-          [offscreen] // transfer ownership — zero-copy
-        )
-        return
-      } catch {
-        // transferControlToOffscreen can throw if the canvas context was already
-        // obtained on the main thread. Fall through to main-thread path.
-      }
-    }
-
-    drawMainThread()
-  }
-
   useEffect(() => {
     draw()
     const ro = new ResizeObserver(draw)
     if (containerRef.current) ro.observe(containerRef.current)
-    return () => {
-      ro.disconnect()
-      if (workerRef.current) {
-        workerRef.current.terminate()
-        workerRef.current = null
-      }
-    }
+    return () => ro.disconnect()
   }, [zoneTimeFractions, zones])
 
   function onMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {

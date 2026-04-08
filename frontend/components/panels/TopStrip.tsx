@@ -1,9 +1,9 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useTankStore } from "@/store/tankStore"
+import { useUIStore } from "@/store/uiStore"
 import { startPipeline, stopPipeline } from "@/lib/api"
 
 // ─── Dot ─────────────────────────────────────────────────────────────────────
@@ -131,6 +131,7 @@ export function TopStrip() {
   const { pipeline, pipelineStartedAt, entities } = useObservationStore()
   const { anomalies, predictions }                = usePredictionStore()
   const tank                                      = useTankStore((s) => s.tank)
+  const { openGraph, openTimeline }               = useUIStore()
   const [vlmActive, setVlmActive] = useState(false)
   const vlmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -224,9 +225,9 @@ export function TopStrip() {
         )}
 
         <div className="flex items-center gap-1.5 text-label text-muted-foreground border-l border-border/40 pl-3">
-          <Link href="/dashboard/graph"    className="hover:text-foreground transition-colors">graph</Link>
+          <button onClick={openGraph}    className="hover:text-foreground transition-colors">graph</button>
           <span className="opacity-30">/</span>
-          <Link href="/dashboard/timeline" className="hover:text-foreground transition-colors">timeline</Link>
+          <button onClick={openTimeline} className="hover:text-foreground transition-colors">timeline</button>
         </div>
 
         <PipelineToggle running={pipeline.running} />

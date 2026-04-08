@@ -1,8 +1,8 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
 import { listEvents } from "@/lib/api"
 import { useTankStore } from "@/store/tankStore"
+import { useUIStore } from "@/store/uiStore"
 import { TEMP_COLOR } from "@/lib/constants"
 import type { BehaviorEvent, KnownFish } from "@/lib/api"
 
@@ -275,8 +275,8 @@ function Legend() {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function InteractionGraph() {
-  const router        = useRouter()
-  const fish          = useTankStore((s) => s.fish).filter((f) => f.is_active)
+  const { openFishModal } = useUIStore()
+  const fish              = useTankStore((s) => s.fish).filter((f) => f.is_active)
   const canvasRef     = useRef<HTMLCanvasElement>(null)
   const containerRef  = useRef<HTMLDivElement>(null)
   const nodesRef      = useRef<Node[]>([])
@@ -362,8 +362,8 @@ export function InteractionGraph() {
     const idx = hoveredRef.current
     if (idx === null) return
     const node = nodesRef.current[idx]
-    if (node?.id) router.push(`/dashboard/fish/${node.id}`)
-  }, [router])
+    if (node?.id) openFishModal(node.id)
+  }, [openFishModal])
 
   const hoveredNode = hovered !== null ? nodesRef.current[hovered] : null
 

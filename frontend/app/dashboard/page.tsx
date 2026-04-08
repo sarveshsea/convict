@@ -3,6 +3,9 @@ import { LeftPanel } from "@/components/panels/LeftPanel"
 import { LiveFeedCanvas } from "@/components/feed/LiveFeedCanvas"
 import { BottomRail } from "@/components/panels/BottomRail"
 import { WSProvider } from "@/components/WSProvider"
+import { FishModal } from "@/components/modals/FishModal"
+import { GraphModal } from "@/components/modals/GraphModal"
+import { TimelineModal } from "@/components/modals/TimelineModal"
 
 export default function DashboardPage() {
   return (
@@ -23,6 +26,11 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal overlays — no page navigation */}
+      <FishModal />
+      <GraphModal />
+      <TimelineModal />
     </WSProvider>
   )
 }

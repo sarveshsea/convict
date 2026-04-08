@@ -7,6 +7,7 @@ import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useAuthStore, useIsAuthed } from "@/store/authStore"
+import { useUIStore } from "@/store/uiStore"
 import { createFish, deleteFish, resolvePrediction, getRelationships, getIncidents, getCommunityHealth } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import { fishSnapshotUrl, TEMP_COLOR, PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
@@ -99,6 +100,7 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
   const conf      = entity?.identity?.confidence ?? 0
   const isTracked = !!entity
   const { removeFish } = useTankStore()
+  const { openFishModal } = useUIStore()
   const [deleting, setDeleting]         = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [imgFailed, setImgFailed]       = useState(false)
@@ -117,7 +119,7 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
 
   return (
     <div className={`relative group border-b border-border/40 hover:bg-muted/40 transition-colors ${isTracked ? "" : "opacity-55"}`}>
-      <Link href={`/dashboard/fish/${fish.uuid}`} className="flex items-center gap-3 px-3 py-2.5 pr-8">
+      <button onClick={() => openFishModal(fish.uuid)} className="w-full flex items-center gap-3 px-3 py-2.5 pr-8 text-left">
         <div className={`w-10 h-10 rounded shrink-0 bg-muted border border-border/60 overflow-hidden relative flex items-center justify-center ${isTracked ? "ring-1 ring-primary/40" : ""}`}>
           {!imgFailed ? (
             <img src={fishSnapshotUrl(fish.uuid, imgTick)} alt="" className="w-full h-full object-cover" onError={() => setImgFailed(true)} />
@@ -142,10 +144,10 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
             <ConfidenceBar value={conf} className="mt-1" />
           )}
         </div>
-      </Link>
+      </button>
       <button
         onClick={async (e) => {
-          e.preventDefault()
+          e.stopPropagation()
           if (!confirmDelete) { setConfirmDelete(true); return }
           setDeleting(true)
           try { await deleteFish(fish.uuid); removeFish(fish.uuid) }
@@ -390,6 +392,7 @@ function ConfigTab() {
 
 function PhotoLightbox({ fish, tick, onClose }: { fish: KnownFish; tick: number; onClose: () => void }) {
   const sp = speciesLabel(fish.species)
+  const { openFishModal } = useUIStore()
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
     document.addEventListener("keydown", onKey)
@@ -414,12 +417,12 @@ function PhotoLightbox({ fish, tick, onClose }: { fish: KnownFish; tick: number;
           {sp.possible && "~"}{sp.text}
         </p>
         <p className="text-label text-white/30">{fish.size_class} · {fish.temperament}</p>
-        <Link
-          href={`/dashboard/fish/${fish.uuid}`}
-          className="block mt-2 text-label text-primary hover:text-primary/80 transition-colors"
+        <button
+          onClick={() => { openFishModal(fish.uuid); onClose() }}
+          className="block mt-2 text-label text-primary hover:text-primary/80 transition-colors text-left"
         >
           view details →
-        </Link>
+        </button>
       </div>
       <button
         onClick={onClose}

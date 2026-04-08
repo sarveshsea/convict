@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { usePredictionStore } from "@/store/predictionStore"
+import { useUIStore } from "@/store/uiStore"
 import type { PredictionItem, AnomalyItem } from "@/store/predictionStore"
 import { PREDICTION_COLORS, SEVERITY_COLORS } from "@/lib/constants"
 import { formatDistanceToNow } from "@/lib/timeUtils"
@@ -62,6 +62,7 @@ function HorizonBar({ expiresAt, horizonMinutes }: { expiresAt: string; horizonM
 function PredictionCard({ p }: { p: PredictionItem }) {
   const colorClass       = PREDICTION_COLORS[p.prediction_type] ?? "text-zinc-400 border-zinc-400/30 bg-zinc-400/5"
   const upsertPrediction = usePredictionStore((s) => s.upsertPrediction)
+  const { openFishModal } = useUIStore()
   const [resolving, setResolving] = useState(false)
   const [expanded,  setExpanded]  = useState(false)
 
@@ -89,10 +90,10 @@ function PredictionCard({ p }: { p: PredictionItem }) {
       {p.involved_fish.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {p.involved_fish.map((f) => (
-            <Link key={f.fish_id} href={`/dashboard/fish/${f.fish_id}`}
+            <button key={f.fish_id} onClick={() => openFishModal(f.fish_id)}
               className="text-label text-muted-foreground border border-border/40 rounded px-1 py-0.5 hover:text-foreground hover:border-border transition-colors">
               {f.fish_name}
-            </Link>
+            </button>
           ))}
         </div>
       )}
@@ -131,6 +132,7 @@ function AnomalyCard({ a, onDismiss }: { a: AnomalyItem; onDismiss: (uuid: strin
   const borderColor = a.severity === "high" ? "border-l-status-critical"
     : a.severity === "medium" ? "border-l-status-warning"
     : "border-l-border"
+  const { openFishModal } = useUIStore()
 
   return (
     <div className={`pl-2.5 pr-3 py-2 border-b border-border/40 border-l-2 ${borderColor} animate-in fade-in duration-300 group`}>
@@ -149,10 +151,10 @@ function AnomalyCard({ a, onDismiss }: { a: AnomalyItem; onDismiss: (uuid: strin
       {a.involved_fish.length > 0 && (
         <div className="flex gap-1.5 flex-wrap">
           {a.involved_fish.map((f) => (
-            <Link key={f.fish_id} href={`/dashboard/fish/${f.fish_id}`}
+            <button key={f.fish_id} onClick={() => openFishModal(f.fish_id)}
               className="text-label text-muted-foreground hover:text-foreground transition-colors">
               {f.fish_name}
-            </Link>
+            </button>
           ))}
         </div>
       )}

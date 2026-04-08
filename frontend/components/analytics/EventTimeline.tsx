@@ -1,9 +1,9 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
 import { listEvents } from "@/lib/api"
 import { usePredictionStore } from "@/store/predictionStore"
 import { useTankStore } from "@/store/tankStore"
+import { useUIStore } from "@/store/uiStore"
 import type { BehaviorEvent, KnownFish } from "@/lib/api"
 import type { AnomalyItem } from "@/store/predictionStore"
 
@@ -193,8 +193,8 @@ function drawTimeline(
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function EventTimeline() {
-  const router       = useRouter()
-  const fish         = useTankStore((s) => s.fish).filter((f) => f.is_active)
+  const { openFishModal } = useUIStore()
+  const fish              = useTankStore((s) => s.fish).filter((f) => f.is_active)
   const liveAnomalies = usePredictionStore((s) => s.anomalies)
 
   const canvasRef    = useRef<HTMLCanvasElement>(null)
@@ -290,8 +290,8 @@ export function EventTimeline() {
     const hit = hoveredRef.current
     if (!hit) return
     const primary = hit.event.involved_fish?.[0]?.fish_id
-    if (primary) router.push(`/dashboard/fish/${primary}`)
-  }, [router])
+    if (primary) openFishModal(primary)
+  }, [openFishModal])
 
   return (
     <div className="flex flex-col h-full min-h-0">
