@@ -163,6 +163,7 @@ class PipelineOrchestrator:
 
         resolver  = IdentityResolver(settings, fish, zones, tank_width_cm=tank_width_cm)
         baseline  = BaselineBuilder(settings)
+        baseline.update_known_fish(fish)   # seed known set so first flush can prune correctly
         anomaly   = AnomalyDetector(settings, fish, baseline)
         patterns  = PatternModeler(settings, fish, baseline)
         predictor = PredictionEngine(settings, fish, anomaly, baseline, resolver)
@@ -235,6 +236,7 @@ class PipelineOrchestrator:
                         resolver.reload_fish(fish)
                         anomaly.update_known_fish(fish)
                         patterns.update_known_fish(fish)
+                        baseline.update_known_fish(fish)
                         predictor._fish = fish
                         health.update_known_fish(fish)
                         self._fish_list = fish
@@ -255,6 +257,7 @@ class PipelineOrchestrator:
                             resolver.reload_fish(fish)
                             anomaly.update_known_fish(fish)
                             patterns.update_known_fish(fish)
+                            baseline.update_known_fish(fish)
                             predictor._fish = fish
                             health.update_known_fish(fish)
                             self._fish_list = fish

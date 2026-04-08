@@ -45,12 +45,13 @@ class IdentityResolver:
 
     def reload_fish(self, fish_list: list) -> None:
         """
-        Queued hot-reload — applied at the top of the next resolve() call.
-        Safe to call from async context while resolve() runs in a thread:
-        CPython GIL protects the reference assignment; only one resolve()
-        is in-flight at a time via asyncio.to_thread.
+        Update the known fish list.
+
+        Called from the asyncio event loop between frames (after the thread running
+        resolve() has already returned). CPython's GIL makes the reference
+        assignment atomic, so this is safe without a lock.
         """
-        self._pending_fish = fish_list
+        self._fish = fish_list
 
     def hint_track_identity(self, track_id: int, fish_uuid: str) -> None:
         """
@@ -67,11 +68,6 @@ class IdentityResolver:
         Synchronous — safe to call from asyncio.to_thread.
         Assigns identity to each entity in-place; returns the same list.
         """
-        # Apply pending hot-reload (set by reload_fish() from async context)
-        if (pending := getattr(self, "_pending_fish", None)) is not None:
-            self._fish = pending
-            self._pending_fish = None
-
         if not self._fish or not entities:
             return entities
 
@@ -96,6 +92,17 @@ class IdentityResolver:
             prev     = self._hyp[tid].get(fid, raw_conf)
             smoothed = (1.0 - alpha) * prev + alpha * raw_conf
             self._hyp[tid][fid] = smoothed
+
+            # Decay competing hypotheses so stale priors don't anchor the wrong
+            # identity after a track reacquisition or mis-assignment correction.
+            decay = 1.0 - alpha
+            for other_fid in list(self._hyp[tid]):
+                if other_fid != fid:
+                    new_val = self._hyp[tid][other_fid] * decay
+                    if new_val < 0.01:
+                        del self._hyp[tid][other_fid]
+                    else:
+                        self._hyp[tid][other_fid] = new_val
 
             log.debug(
                 "T%d → %s  raw=%.3f smoothed=%.3f (threshold=%.2f)",

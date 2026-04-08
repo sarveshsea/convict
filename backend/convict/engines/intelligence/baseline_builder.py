@@ -33,6 +33,14 @@ class BaselineBuilder:
         self._totals:      dict[str, int]             = defaultdict(int)
         # fish_uuid → other_fish_uuid → frames spent within _PROXIMITY_PX
         self._proximity:   dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        # set of known fish uuids — used to prune state for deleted fish on flush
+        self._known_uuids: set[str] = set()
+
+    # ------------------------------------------------------------------
+
+    def update_known_fish(self, fish_list: list) -> None:
+        """Called by orchestrator after any fish-list refresh."""
+        self._known_uuids = {f.uuid for f in fish_list}
 
     # ------------------------------------------------------------------
 
@@ -111,6 +119,16 @@ class BaselineBuilder:
                 observation_frame_count  = total,
             )
             db.add(bl)
+
+        # Prune in-memory state for fish that no longer exist.
+        # Runs at flush cadence (every N frames) — good enough for multi-day runs.
+        if self._known_uuids:
+            for stale_fid in [fid for fid in list(self._totals) if fid not in self._known_uuids]:
+                self._zone_counts.pop(stale_fid, None)
+                self._speeds.pop(stale_fid, None)
+                self._by_hour.pop(stale_fid, None)
+                del self._totals[stale_fid]
+                self._proximity.pop(stale_fid, None)
 
         try:
             await db.commit()

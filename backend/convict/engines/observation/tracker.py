@@ -23,6 +23,8 @@ class FishTracker:
         )
         self._frame_count = 0
         self._last_track_count = 0
+        # frame_count of last observation per track_id — for centroid GC
+        self._last_seen: dict[int, int] = {}
 
     # ------------------------------------------------------------------
 
@@ -34,6 +36,7 @@ class FishTracker:
             minimum_consecutive_frames=self._settings.tracker_min_hits,
         )
         self._centroids.clear()
+        self._last_seen.clear()
         self._frame_count = 0
         self._last_track_count = 0
 
@@ -60,7 +63,21 @@ class FishTracker:
                 x1, y1, x2, y2 = tracked.xyxy[i]
                 cx = (x1 + x2) / 2.0
                 cy = (y1 + y2) / 2.0
-                self._centroids[int(tid)].append((float(cx), float(cy)))
+                tid_int = int(tid)
+                self._centroids[tid_int].append((float(cx), float(cy)))
+                self._last_seen[tid_int] = self._frame_count
+
+            # Prune centroid history for track IDs gone for > 2× the lost-track buffer.
+            # ByteTrack uses monotonically increasing IDs — old ones are never reused,
+            # so without this the dict grows forever over multi-day runs.
+            gc_threshold = self._settings.tracker_max_age * 2
+            stale = [
+                tid for tid, last in self._last_seen.items()
+                if self._frame_count - last > gc_threshold
+            ]
+            for tid in stale:
+                self._centroids.pop(tid, None)
+                del self._last_seen[tid]
         else:
             self._last_track_count = 0
 
