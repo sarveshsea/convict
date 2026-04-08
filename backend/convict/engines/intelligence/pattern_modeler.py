@@ -1,13 +1,14 @@
 """
 Pattern modeler — runs every 5 minutes over recent baseline data.
 
-Detects multi-fish behavioral patterns using cross-correlation and
-zone co-occurrence, then writes them to behavior_patterns.
+Detects multi-fish behavioral patterns using cross-correlation, zone
+co-occurrence, circadian rhythm analysis, and proximity data.
 
 Pattern types:
-  schooling         — multiple fish show correlated speed changes
-  territory_defense — one fish shows high speed + zone exclusivity
-  post_feeding_patrol — elevated activity in feeding zones post-schedule
+  schooling           — multiple fish show correlated speed changes
+  territory_defense   — one fish shows high speed + zone exclusivity
+  circadian_deviation — fish active/inactive at unexpected hours vs baseline
+  pair_bonding        — two fish consistently proximate, low aggression between them
 """
 from __future__ import annotations
 
@@ -37,6 +38,8 @@ class PatternModeler:
 
         patterns += await self._detect_schooling(db)
         patterns += await self._detect_territory_defense(db)
+        patterns += await self._detect_circadian_deviation(db)
+        patterns += await self._detect_pair_bonding(db)
 
         return patterns
 
@@ -123,6 +126,158 @@ class PatternModeler:
             )
             if p:
                 results.append(p)
+
+        return results
+
+    async def _detect_circadian_deviation(self, db) -> list[dict]:
+        """
+        Compares each fish's live activity fraction for the current hour against
+        its stored activity_by_hour baseline.
+
+        A fish that is historically very active at hour H but is barely seen now
+        (or vice versa) gets a circadian_deviation pattern written.  This can be
+        caused by stress, illness, environmental disruption, or a light-cycle change.
+        """
+        import json
+        from datetime import datetime
+        from sqlalchemy import select, desc
+        from convict.models.behavior_baseline import BehaviorBaseline
+
+        current_hour = datetime.now().hour
+        results: list[dict] = []
+
+        for fish in self._fish:
+            # Latest stored baseline from DB
+            row = (await db.execute(
+                select(BehaviorBaseline)
+                .where(BehaviorBaseline.fish_id == fish.id)
+                .order_by(desc(BehaviorBaseline.computed_at))
+                .limit(1)
+            )).scalar_one_or_none()
+
+            if not row or not row.activity_by_hour:
+                continue
+            try:
+                by_hour = json.loads(row.activity_by_hour)
+            except Exception:
+                continue
+
+            hours = [float(by_hour.get(str(i), 0)) for i in range(24)]
+            total = sum(hours)
+            if total < 100:  # insufficient historical data
+                continue
+
+            # Only bother if there IS a meaningful circadian pattern
+            # (coefficient of variation across hours must be noticeable)
+            arr = np.array(hours)
+            mean_h = arr.mean()
+            if mean_h <= 0 or arr.std() / mean_h < 0.30:
+                continue
+
+            expected_frac = hours[current_hour] / total
+
+            # Live fraction: how much of this session the fish was seen this hour
+            live_hour  = float(self._baseline._by_hour.get(fish.uuid, {}).get(current_hour, 0))
+            live_total = float(self._baseline._totals.get(fish.uuid, 1))
+            if live_total < 30:
+                continue
+            live_frac = live_hour / live_total
+
+            # Flag if the fish is significantly over- or under-active vs expectation
+            expected_state = "active" if expected_frac > (1 / 24 * 1.5) else "inactive"
+            if expected_state == "active" and live_frac < expected_frac * 0.30:
+                deviation = "unexpectedly_inactive"
+            elif expected_state == "inactive" and live_frac > expected_frac * 2.50:
+                deviation = "unexpectedly_active"
+            else:
+                continue
+
+            delta = abs(expected_frac - live_frac)
+            p = await self._upsert_pattern(
+                db,
+                fish_id      = fish.uuid,
+                pattern_type = "circadian_deviation",
+                signature    = {
+                    "current_hour":   current_hour,
+                    "deviation":      deviation,
+                    "expected_frac":  round(expected_frac, 3),
+                    "live_frac":      round(live_frac, 3),
+                },
+                confidence   = round(min(0.85, delta / max(expected_frac, 0.01)), 2),
+            )
+            if p:
+                results.append(p)
+
+        return results
+
+    async def _detect_pair_bonding(self, db) -> list[dict]:
+        """
+        Detects fish pairs with sustained proximity (> 150 frames) and low
+        inter-pair aggression — characteristic of pair bonding or tight shoaling.
+
+        Uses the live baseline proximity counts plus recent interaction edges to
+        distinguish bonded pairs from proximity that is actually conflict-driven.
+        """
+        from datetime import timedelta, datetime as _dt
+        from sqlalchemy import select
+        from convict.models.interaction_edge import InteractionEdge
+        from convict.models.known_fish import KnownFish
+
+        results: list[dict] = []
+        seen_pairs: set[tuple[str, str]] = set()
+
+        for fish in self._fish:
+            prox = self._baseline.proximity_counts(fish.uuid)
+            if not prox:
+                continue
+
+            for partner_uuid, frame_count in prox.items():
+                if frame_count < 150:
+                    continue
+
+                pair_key = tuple(sorted([fish.uuid, partner_uuid]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+
+                partner = next((f for f in self._fish if f.uuid == partner_uuid), None)
+                if not partner:
+                    continue
+
+                # Canonical ordering by DB id
+                id_a = min(fish.id, partner.id)
+                id_b = max(fish.id, partner.id)
+
+                # Count harassment edges between this pair in last 48h
+                since = _dt.utcnow() - timedelta(hours=48)
+                harassment_edges = (await db.execute(
+                    select(InteractionEdge).where(
+                        InteractionEdge.fish_a_id        == id_a,
+                        InteractionEdge.fish_b_id        == id_b,
+                        InteractionEdge.interaction_type == "harassment",
+                        InteractionEdge.occurred_at      >= since,
+                    )
+                )).scalars().all()
+
+                if len(harassment_edges) > 5:
+                    continue  # too much aggression — not a bond
+
+                confidence = round(min(0.80, (frame_count - 150) / 500 + 0.30), 2)
+
+                p = await self._upsert_pattern(
+                    db,
+                    fish_id      = fish.uuid,
+                    pattern_type = "pair_bonding",
+                    signature    = {
+                        "partner_uuid":      partner_uuid,
+                        "partner_name":      partner.name,
+                        "proximity_frames":  frame_count,
+                        "harassment_count":  len(harassment_edges),
+                    },
+                    confidence   = confidence,
+                )
+                if p:
+                    results.append(p)
 
         return results
 

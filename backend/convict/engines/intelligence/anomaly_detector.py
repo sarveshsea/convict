@@ -2,15 +2,22 @@
 Anomaly detector.
 
 Runs two tiers:
-  Every frame   — track missing-fish counters, pairwise proximity counters
+  Every frame   — track missing-fish counters, pairwise proximity counters,
+                  centroid-y history for surface detection
   Every 60 frames (~12s) — evaluate thresholds and emit events
 
 Detected event types:
-  missing_fish   — known fish unseen for missing_fish_frames
-  harassment     — two identified fish within harassment_distance_px
-                   for harassment_duration_frames consecutive frames
-  lethargy       — identified fish speed > 3σ below baseline mean
-  hyperactivity  — identified fish speed > 3σ above baseline mean
+  missing_fish        — known fish unseen for missing_fish_frames
+  harassment          — two identified fish within harassment_distance_px
+                        for harassment_duration_frames consecutive frames
+  lethargy            — identified fish speed > 3σ below baseline mean
+  hyperactivity       — identified fish speed > 3σ above baseline mean
+  synchronized_stress — ≥50% of identified fish stressed simultaneously
+                        (water quality proxy — check O₂, ammonia, temperature)
+  erratic_motion      — fish trail shows repeated rapid direction reversals
+                        (neurological stress, medication reaction, spawn frenzy)
+  surface_gathering   — multiple fish clustered in top 25% of observed frame height
+                        (hypoxia proxy — low dissolved oxygen)
 
 Interaction edges (drained by orchestrator via pop_interactions()):
   harassment  — emitted when harassment threshold fires
@@ -18,14 +25,42 @@ Interaction edges (drained by orchestrator via pop_interactions()):
 """
 from __future__ import annotations
 
+import math
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 from convict.engines.intelligence.baseline_builder import BaselineBuilder
 
 # Minimum close frames before a separating pair gets a "proximity" edge recorded
 _MIN_PROXIMITY_FRAMES = 15
+
+
+def _is_erratic(trail: list) -> bool:
+    """
+    True if the trail shows repeated rapid direction reversals.
+
+    Computes the mean angle between consecutive trail segments. A high mean
+    angle (> ~80°) means the fish is oscillating back and forth — characteristic
+    of flashing/scratching, neurological stress, or spawn-frenzy darting.
+    """
+    if len(trail) < 6:
+        return False
+    angles = []
+    for i in range(1, len(trail) - 1):
+        dx1 = trail[i][0]   - trail[i - 1][0]
+        dy1 = trail[i][1]   - trail[i - 1][1]
+        dx2 = trail[i + 1][0] - trail[i][0]
+        dy2 = trail[i + 1][1] - trail[i][1]
+        m1 = (dx1 ** 2 + dy1 ** 2) ** 0.5
+        m2 = (dx2 ** 2 + dy2 ** 2) ** 0.5
+        if m1 < 1.0 or m2 < 1.0:
+            continue  # standing still — skip segment
+        cos_a = (dx1 * dx2 + dy1 * dy2) / (m1 * m2)
+        angles.append(math.acos(max(-1.0, min(1.0, cos_a))))
+    if len(angles) < 3:
+        return False
+    return (sum(angles) / len(angles)) > 1.4   # ~80° avg turn = erratic
 
 
 class AnomalyDetector:
@@ -46,6 +81,15 @@ class AnomalyDetector:
         # Pending interaction edges -- drained by orchestrator via pop_interactions()
         self._pending_interactions: list[dict] = []
 
+        # ── New: vision-only water quality / health signals ───────────────────
+        # Rolling centroid y-values for surface-gathering detection
+        self._centroid_ys: deque = deque(maxlen=600)
+        # Cooldown counters (in check-interval ticks, not raw frames)
+        self._surface_cooldown:      int = 0
+        self._synced_stress_cooldown: int = 0
+        # fish_uuid -> consecutive erratic check cycles
+        self._erratic_counts: dict[str, int] = defaultdict(int)
+
     # ------------------------------------------------------------------
 
     def update_known_fish(self, fish: list) -> None:
@@ -58,6 +102,14 @@ class AnomalyDetector:
         """
         self._frame += 1
         events: list[dict] = []
+
+        # ── Track centroid y values every frame (surface detection) ────
+        for e in entities:
+            self._centroid_ys.append(e["centroid"][1])
+
+        # Decrement cooldowns every frame
+        if self._surface_cooldown      > 0: self._surface_cooldown      -= 1
+        if self._synced_stress_cooldown > 0: self._synced_stress_cooldown -= 1
 
         # --- Track which known fish are currently visible ---------------
         visible_ids = {
@@ -159,29 +211,92 @@ class AnomalyDetector:
                     })
             self._close_ids.pop(k, None)
 
-        # --- Speed deviation check ------------------------------------
+        # --- Speed deviation + erratic motion check -------------------
+        stressed_count = 0  # for synchronized_stress
+        active_fids: set[str] = set()
+
         for e in ident:
             fid  = e["identity"]["fish_id"]
             conf = e["identity"].get("confidence", 0.0)
-            if conf < 0.6 or fid in self._alerted:
+            active_fids.add(fid)
+            if conf < 0.6:
                 continue
 
             mean, std = self._baseline.speed_stats(fid)
-            if std < 0.5:
-                continue  # not enough baseline data
-
             speed = e.get("speed_px_per_frame", 0.0)
             sigma = self._s.anomaly_speed_sigma
 
-            fish_name = e["identity"]["fish_name"]
-            if speed < mean - sigma * std:
-                events.append(self._make("lethargy", "medium",
-                                          [{"fish_id": fid, "fish_name": fish_name}]))
-                self._alerted[fid] = 0
-            elif speed > mean + sigma * std:
-                events.append(self._make("hyperactivity", "medium",
-                                          [{"fish_id": fid, "fish_name": fish_name}]))
-                self._alerted[fid] = 0
+            # Count stressed fish (regardless of cooldown — for synchronized_stress)
+            if std >= 0.5:
+                if speed < mean - sigma * std or speed > mean + sigma * std:
+                    stressed_count += 1
+
+            # Individual alerts (respects cooldown)
+            if fid not in self._alerted and std >= 0.5:
+                fish_name = e["identity"]["fish_name"]
+                if speed < mean - sigma * std:
+                    events.append(self._make("lethargy", "medium",
+                                              [{"fish_id": fid, "fish_name": fish_name}]))
+                    self._alerted[fid] = 0
+                elif speed > mean + sigma * std:
+                    events.append(self._make("hyperactivity", "medium",
+                                              [{"fish_id": fid, "fish_name": fish_name}]))
+                    self._alerted[fid] = 0
+
+            # ── Erratic motion detection ───────────────────────────────
+            trail = e.get("trail", [])
+            if _is_erratic(trail):
+                self._erratic_counts[fid] += 1
+                # Require 3 consecutive erratic check cycles to fire (avoids one-off bursts)
+                if self._erratic_counts[fid] == 3:
+                    events.append(self._make("erratic_motion", "medium",
+                                              [{"fish_id": fid,
+                                                "fish_name": e["identity"]["fish_name"]}]))
+            else:
+                if self._erratic_counts.get(fid, 0) > 0:
+                    self._erratic_counts[fid] = max(0, self._erratic_counts[fid] - 1)
+
+        # Clean up erratic counts for fish no longer in frame
+        for fid in list(self._erratic_counts):
+            if fid not in active_fids:
+                del self._erratic_counts[fid]
+
+        # ── Synchronized stress (water quality proxy) ──────────────────
+        # Fires when ≥50% of identified fish are simultaneously outside their
+        # individual speed baselines. Individual fish illness rarely hits half
+        # the tank at once — environmental cause is most likely.
+        if (len(ident) >= 2 and stressed_count >= max(2, len(ident) // 2 + 1)
+                and self._synced_stress_cooldown == 0):
+            events.append(self._make(
+                "synchronized_stress", "high",
+                [{"fish_id": e["identity"]["fish_id"],
+                  "fish_name": e["identity"]["fish_name"]}
+                 for e in ident if e["identity"].get("fish_id")],
+            ))
+            self._synced_stress_cooldown = 120   # ~20min at default check interval
+
+        # ── Surface gathering (hypoxia proxy) ──────────────────────────
+        # Fish compressed toward the top of the tank = seeking oxygen at surface.
+        # Uses relative y-position within the observed centroid range to avoid
+        # needing explicit frame dimensions.
+        if (len(self._centroid_ys) > 100 and len(ident) >= 2
+                and self._surface_cooldown == 0):
+            ys     = list(self._centroid_ys)
+            y_min  = min(ys)
+            y_max  = max(ys)
+            y_rng  = max(y_max - y_min, 1.0)
+            # In OpenCV y=0 is top of frame; "surface" = small y values
+            surface_thresh = y_min + y_rng * 0.25
+            current_ys     = [e["centroid"][1] for e in ident]
+            surface_count  = sum(1 for y in current_ys if y <= surface_thresh)
+            if surface_count >= max(2, len(current_ys) // 2 + 1):
+                events.append(self._make(
+                    "surface_gathering", "high",
+                    [{"fish_id": e["identity"]["fish_id"],
+                      "fish_name": e["identity"]["fish_name"]}
+                     for e in ident if e["identity"].get("fish_id")],
+                ))
+                self._surface_cooldown = 120
 
         return events
 

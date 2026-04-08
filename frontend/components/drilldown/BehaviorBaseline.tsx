@@ -40,6 +40,7 @@ export function BehaviorBaseline({ baseline }: Props) {
     const hours  = Array.from({ length: 24 }, (_, i) => Number(byHour[i] ?? 0))
     hoursRef.current = hours
     const maxVal = Math.max(...hours, 1)
+    const currentHour = new Date().getHours()
 
     const barW  = W / 24
     const chartH = H - padB - padT
@@ -62,9 +63,21 @@ export function BehaviorBaseline({ baseline }: Props) {
         const x     = i * barW
         const y     = H - padB - barH
         const t     = hours[i] / maxVal
-        const alpha = 0.3 + t * 0.6
-        ctx.fillStyle = `rgba(96,165,250,${alpha})`
+
+        if (i === currentHour) {
+          // Current hour: amber highlight
+          ctx.fillStyle = `rgba(251,191,36,${0.4 + t * 0.5})`
+        } else {
+          const alpha = 0.3 + t * 0.6
+          ctx.fillStyle = `rgba(96,165,250,${alpha})`
+        }
         ctx.fillRect(x + 1, y, barW - 2, barH)
+
+        // Current-hour marker line at bottom
+        if (i === currentHour) {
+          ctx.fillStyle = "rgba(251,191,36,0.8)"
+          ctx.fillRect(x + 1, H - padB, barW - 2, 2)
+        }
       }
 
       // Hour labels
@@ -72,6 +85,7 @@ export function BehaviorBaseline({ baseline }: Props) {
       ctx.font = `8px 'Fira Code', monospace`
       ctx.textAlign = "center"
       for (const h of [0, 6, 12, 18, 23]) {
+        ctx.fillStyle = h === currentHour ? "rgba(251,191,36,0.8)" : CANVAS_COLORS.text
         ctx.fillText(String(h), h * barW + barW / 2, H - 5)
       }
 

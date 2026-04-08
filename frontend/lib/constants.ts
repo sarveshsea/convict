@@ -17,6 +17,10 @@ export const PREDICTION_COLORS: Record<string, string> = {
   territory_shift:       "text-blue-400 border-blue-400/30 bg-blue-400/5",
   schooling_break:       "text-zinc-400 border-zinc-400/30 bg-zinc-400/5",
   feeding_disruption:    "text-orange-400 border-orange-400/30 bg-orange-400/5",
+  water_quality_alert:   "text-rose-500 border-rose-500/40 bg-rose-500/10",
+  disease_early_warning: "text-amber-400 border-amber-400/30 bg-amber-400/5",
+  spawning_imminent:     "text-emerald-400 border-emerald-400/30 bg-emerald-400/5",
+  circadian_disruption:  "text-indigo-400 border-indigo-400/30 bg-indigo-400/5",
 }
 
 export const SEVERITY_COLORS: Record<string, string> = {

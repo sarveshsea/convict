@@ -567,11 +567,15 @@ const SEV_STYLE: Record<string, string> = {
   low:    "border-zinc-500/40 text-zinc-400",
 }
 const CHAIN_DOTS: Record<string, string> = {
-  harassment:   "bg-rose-400",
-  lethargy:     "bg-blue-400",
-  hyperactivity:"bg-amber-400",
-  missing_fish: "bg-zinc-400",
-  hiding:       "bg-indigo-400",
+  harassment:          "bg-rose-400",
+  lethargy:            "bg-blue-400",
+  hyperactivity:       "bg-amber-400",
+  missing_fish:        "bg-zinc-400",
+  hiding:              "bg-indigo-400",
+  synchronized_stress: "bg-rose-500",
+  surface_gathering:   "bg-sky-400",
+  erratic_motion:      "bg-orange-400",
+  circadian_deviation: "bg-violet-400",
 }
 
 function IncidentSection() {
@@ -627,6 +631,41 @@ function IncidentSection() {
   )
 }
 
+// ─── Water Quality Alert Banner ───────────────────────────────────────────────
+
+function WaterQualityAlert() {
+  const predictions = usePredictionStore((s) => s.predictions)
+  const anomalies   = usePredictionStore((s) => s.anomalies)
+
+  const wqPred = predictions.find(
+    (p) => p.prediction_type === "water_quality_alert" && p.status === "active"
+  )
+  const hasSurface = anomalies.some((a: any) => a.event_type === "surface_gathering")
+  const hasSyncStress = anomalies.some((a: any) => a.event_type === "synchronized_stress")
+
+  if (!wqPred && !hasSurface && !hasSyncStress) return null
+
+  const signals: string[] = []
+  if (hasSurface)    signals.push("surface gathering")
+  if (hasSyncStress) signals.push("synchronized stress")
+  if (wqPred)        signals.push("model alert")
+
+  return (
+    <div className="mx-3 mt-3 mb-1 flex items-start gap-2 rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 animate-in fade-in duration-300 shrink-0">
+      <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse mt-1 shrink-0" />
+      <div className="min-w-0">
+        <p className="text-caption text-rose-400 font-medium">Water quality concern</p>
+        <p className="text-label text-muted-foreground mt-0.5 leading-snug">
+          {signals.join(" · ")} — check O₂, ammonia, temperature
+        </p>
+        {wqPred && (
+          <p className="text-label text-muted-foreground/70 mt-0.5">{(wqPred.confidence * 100).toFixed(0)}% confidence · {wqPred.horizon_minutes}min horizon</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Intel Tab ────────────────────────────────────────────────────────────────
 
 function IntelTab() {
@@ -645,6 +684,7 @@ function IntelTab() {
 
   return (
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
+      <WaterQualityAlert />
       <HealthCard />
       <RelationshipSection />
       <IncidentSection />

@@ -126,6 +126,8 @@ class PipelineOrchestrator:
         except Exception:
             pass
 
+        self._schedules = schedules
+
         # ---- AutoRegistrar (fish auto-discovery) ----------------------
         tank_width_cm = float(getattr(tank, "width_cm", 60.0) or 60.0) if tank else 60.0
         auto_registrar = None
@@ -371,7 +373,7 @@ class PipelineOrchestrator:
                     # Patterns
                     new_patterns = await self._patterns.run(db)
                     # Predictions
-                    new_preds = await self._predictor.run(db)
+                    new_preds = await self._predictor.run(db, schedules=getattr(self, "_schedules", None))
                     # Community health
                     health_payload = await self._health.run(db)
                     # Species inference for auto-detected fish
