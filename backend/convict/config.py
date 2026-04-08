@@ -91,9 +91,12 @@ class Settings(BaseSettings):
     anomaly_check_interval_frames: int = 60      # check every ~12s
 
     # AutoRegistrar
-    auto_register_min_stable_frames: int = 60    # ~5s at 12fps before auto-creating fish
+    auto_register_min_stable_frames: int = 90    # ~7.5s at 12fps — fish stay put, people walk through
     auto_register_color_dedup_threshold: float = 0.25  # L1 hist distance below this = same fish
     auto_register_hist_sample_frames: int = 30   # last N bboxes to average histogram from
+    # Plausibility gate: blobs outside these bounds are not fish (e.g. people)
+    auto_register_max_aspect_ratio: float = 3.0      # h/w ratio — reject tall/narrow objects
+    auto_register_max_bbox_area_ratio: float = 0.12  # reject if bbox > 12% of total frame area
 
     # VLM (Gemma via Ollama — optional, cross-platform)
     # Setup: install Ollama (https://ollama.com), then: ollama pull gemma3:2b

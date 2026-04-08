@@ -131,13 +131,30 @@ class AutoRegistrar:
         if not bboxes:
             return False
 
+        # ── Plausibility gate: reject non-fish blobs ──────────────────────────
+        # People, hands, and other intruders have aspect ratios and relative
+        # sizes that no fish species produces. Reject before any DB work.
+        fh, fw = frame.shape[:2]
+        x1, y1, x2, y2 = entity["bbox"]
+        bw = max(x2 - x1, 1)
+        bh = max(y2 - y1, 1)
+        aspect   = bh / bw                          # h/w: person ≈ 3-6, fish ≈ 0.3-2.5
+        rel_area = (bw * bh) / max(fw * fh, 1)      # fraction of total frame
+
+        max_aspect = getattr(self._s, "auto_register_max_aspect_ratio", 3.0)
+        max_area   = getattr(self._s, "auto_register_max_bbox_area_ratio", 0.12)
+
+        if aspect > max_aspect:
+            return False   # tall/narrow → standing person or other non-fish
+        if rel_area > max_area:
+            return False   # too large → person close to camera
+
         # Build averaged histogram
         candidate_hist = self._avg_histogram(frame, bboxes, resolver)
         if candidate_hist is None:
             return False
 
         # Estimate size
-        fh, fw = frame.shape[:2]
         x1, y1, x2, y2 = entity["bbox"]
         px_len  = max(x2 - x1, y2 - y1)
         est_cm  = _px_to_cm(px_len, fw, self._tank_width_cm)
