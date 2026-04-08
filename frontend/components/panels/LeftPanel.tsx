@@ -2,10 +2,11 @@
 import { useState, useRef, useEffect } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown } from "lucide-react"
+import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown, Lock } from "lucide-react"
 import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
+import { useAuthStore, useIsAuthed } from "@/store/authStore"
 import { createFish, deleteFish, resolvePrediction } from "@/lib/api"
 import { searchFish } from "@/lib/fishDatabase"
 import type { KnownFish } from "@/lib/api"
@@ -73,6 +74,7 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
   const isTracked = !!entity
   const { removeFish } = useTankStore()
   const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
   const sp = speciesLabel(fish.species)
   const confColor = conf >= 0.7 ? "bg-emerald-400" : conf >= 0.4 ? "bg-amber-400" : "bg-rose-500"
@@ -110,13 +112,35 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
           )}
         </div>
       </Link>
-      <button
-        onClick={async (e) => { e.preventDefault(); setDeleting(true); try { await deleteFish(fish.uuid); removeFish(fish.uuid) } catch { setDeleting(false) } }}
-        disabled={deleting}
-        className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 text-zinc-700 hover:text-rose-400 transition-all p-0.5 disabled:opacity-30"
-      >
-        <X size={12} />
-      </button>
+      {confirmDelete ? (
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          <button
+            onClick={async (e) => {
+              e.preventDefault()
+              setDeleting(true)
+              try { await deleteFish(fish.uuid); removeFish(fish.uuid) }
+              catch { setDeleting(false); setConfirmDelete(false) }
+            }}
+            disabled={deleting}
+            className="text-[10px] font-mono text-rose-400 border border-rose-400/30 rounded px-1.5 py-0.5 hover:bg-rose-400/10 transition-colors disabled:opacity-40"
+          >
+            {deleting ? "…" : "delete"}
+          </button>
+          <button
+            onClick={(e) => { e.preventDefault(); setConfirmDelete(false) }}
+            className="text-[10px] font-mono text-zinc-600 border border-zinc-700 rounded px-1.5 py-0.5 hover:text-zinc-400 transition-colors"
+          >
+            cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={(e) => { e.preventDefault(); setConfirmDelete(true) }}
+          className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 text-zinc-700 hover:text-rose-400 transition-all p-0.5"
+        >
+          <X size={12} />
+        </button>
+      )}
     </div>
   )
 }
@@ -414,11 +438,56 @@ function IntelTab() {
   )
 }
 
+// ─── Auth Gate ────────────────────────────────────────────────────────────────
+
+function AuthGate({ onUnlock }: { onUnlock: () => void }) {
+  const { login, passwordRequired } = useAuthStore()
+  const [pw, setPw]       = useState("")
+  const [error, setError] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError(false)
+    const ok = await login(pw)
+    setLoading(false)
+    if (ok) onUnlock()
+    else { setError(true); setPw("") }
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
+      <Lock size={20} className="text-zinc-600" />
+      <p className="text-xs font-mono text-zinc-500 text-center">Config is password protected</p>
+      <form onSubmit={submit} className="w-full space-y-2">
+        <input
+          type="password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          placeholder="password"
+          autoFocus
+          className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+        />
+        {error && <p className="text-xs text-rose-400 font-mono">wrong password</p>}
+        <button type="submit" disabled={!pw || loading}
+          className="w-full py-2 rounded border border-zinc-700 text-xs font-mono text-zinc-400 hover:text-foreground hover:border-zinc-500 transition-colors disabled:opacity-30">
+          {loading ? "checking…" : "unlock"}
+        </button>
+      </form>
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function LeftPanel() {
   const [collapsed, setCollapsed] = useState(false)
   const [tab, setTab]             = useState<Tab>("config")
+  const isAuthed = useIsAuthed()
+  const { checkStatus } = useAuthStore()
+
+  useEffect(() => { checkStatus() }, [])
 
   if (collapsed) {
     return (
@@ -465,10 +534,11 @@ export function LeftPanel() {
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {tab === "roster"    && <RosterTab />}
-        {tab === "config"    && <ConfigTab />}
-        {tab === "snapshots" && <SnapshotsTab />}
-        {tab === "intel"     && <IntelTab />}
+        {tab === "intel" && <IntelTab />}
+        {tab !== "intel" && !isAuthed && <AuthGate onUnlock={() => {}} />}
+        {tab === "roster"    && isAuthed && <RosterTab />}
+        {tab === "config"    && isAuthed && <ConfigTab />}
+        {tab === "snapshots" && isAuthed && <SnapshotsTab />}
       </div>
     </aside>
   )

@@ -63,6 +63,12 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         // Auto-detected fish created or species guessed — refresh the roster
         listFish().then((f) => setFish(f)).catch(() => {})
       }),
+      convictWS.on<any>("vlm_analysis", (msg: WSMessage<any>) => {
+        // Feed VLM anomalies into the prediction store so they appear in the Intel tab
+        if (msg.payload?.anomalies?.length) {
+          msg.payload.anomalies.forEach((a: any) => addAnomaly(a))
+        }
+      }),
     ]
 
     return () => {

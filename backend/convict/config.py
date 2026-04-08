@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     # Server
     api_port: int = 8000
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    admin_password: str = ""  # set ADMIN_PASSWORD=yourpassword in .env.local; empty = no auth
+    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"]
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Database

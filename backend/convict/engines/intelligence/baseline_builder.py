@@ -9,7 +9,7 @@ Every baseline_flush_interval_frames: writes a snapshot to behavior_baselines.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime
 
 import numpy as np
@@ -22,8 +22,8 @@ class BaselineBuilder:
 
         # fish_uuid → zone_uuid → frame count in zone
         self._zone_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        # fish_uuid → list of speed values
-        self._speeds:      dict[str, list[float]]    = defaultdict(list)
+        # fish_uuid → speed history (capped deque — no manual slicing needed)
+        self._speeds:      dict[str, deque]          = defaultdict(lambda: deque(maxlen=1000))
         # fish_uuid → hour → frame count
         self._by_hour:     dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         # fish_uuid → total confident frames seen
@@ -49,9 +49,6 @@ class BaselineBuilder:
 
             speed = e.get("speed_px_per_frame", 0.0)
             self._speeds[fid].append(speed)
-            # Cap history to avoid unbounded growth
-            if len(self._speeds[fid]) > 2000:
-                self._speeds[fid] = self._speeds[fid][-1000:]
 
             self._by_hour[fid][hour] += 1
 

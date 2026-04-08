@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from convict.api.deps import get_db
 from convict.engines.knowledge.tank_knowledge_engine import require_tank
@@ -54,32 +55,38 @@ async def list_events(
 async def list_patterns(
     db: AsyncSession = Depends(get_db),
 ):
-    tank  = await require_tank(db)
-    rows  = (await db.execute(
+    tank = await require_tank(db)
+
+    # Load patterns + their fish in one query via join
+    fish_by_id: dict[int, KnownFish] = {}
+    rows = (await db.execute(
         select(BehaviorPattern)
         .where(BehaviorPattern.tank_id == tank.id)
         .order_by(desc(BehaviorPattern.last_seen_at))
     )).scalars().all()
 
-    results = []
-    for r in rows:
-        fish = None
-        if r.fish_id:
-            fish = (await db.execute(
-                select(KnownFish).where(KnownFish.id == r.fish_id)
-            )).scalar_one_or_none()
-        results.append({
-            "uuid":            r.uuid,
-            "pattern_type":    r.pattern_type,
-            "fish_id":         fish.uuid if fish else None,
-            "fish_name":       fish.name if fish else None,
-            "confidence":      r.confidence,
-            "signature":       json.loads(r.signature) if r.signature else {},
-            "first_seen_at":   r.first_seen_at.isoformat(),
-            "last_seen_at":    r.last_seen_at.isoformat(),
+    # Batch-load all referenced fish in one query
+    fish_ids = {r.fish_id for r in rows if r.fish_id}
+    if fish_ids:
+        fish_rows = (await db.execute(
+            select(KnownFish).where(KnownFish.id.in_(fish_ids))
+        )).scalars().all()
+        fish_by_id = {f.id: f for f in fish_rows}
+
+    return [
+        {
+            "uuid":             r.uuid,
+            "pattern_type":     r.pattern_type,
+            "fish_id":          fish_by_id[r.fish_id].uuid if r.fish_id and r.fish_id in fish_by_id else None,
+            "fish_name":        fish_by_id[r.fish_id].name if r.fish_id and r.fish_id in fish_by_id else None,
+            "confidence":       r.confidence,
+            "signature":        json.loads(r.signature) if r.signature else {},
+            "first_seen_at":    r.first_seen_at.isoformat(),
+            "last_seen_at":     r.last_seen_at.isoformat(),
             "occurrence_count": r.occurrence_count,
-        })
-    return results
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -91,14 +98,24 @@ async def list_predictions(
     status: str = Query("active"),
     db: AsyncSession = Depends(get_db),
 ):
-    tank  = await require_tank(db)
-    query = (
+    tank = await require_tank(db)
+    rows = (await db.execute(
         select(Prediction)
         .where(Prediction.tank_id == tank.id, Prediction.status == status)
         .order_by(desc(Prediction.created_at))
-    )
-    rows  = (await db.execute(query)).scalars().all()
-    return [await _prediction_dict(r, db) for r in rows]
+    )).scalars().all()
+
+    if not rows:
+        return []
+
+    # Batch-load evidence bundles in one query
+    pred_ids = [r.id for r in rows]
+    bundles = (await db.execute(
+        select(EvidenceBundle).where(EvidenceBundle.prediction_id.in_(pred_ids))
+    )).scalars().all()
+    bundle_by_pred = {b.prediction_id: b for b in bundles}
+
+    return [_prediction_dict_sync(r, bundle_by_pred.get(r.id)) for r in rows]
 
 
 @router.post("/predictions/{pred_uuid}/resolve")
@@ -138,11 +155,7 @@ def _event_dict(r: BehaviorEvent) -> dict:
     }
 
 
-async def _prediction_dict(r: Prediction, db: AsyncSession) -> dict:
-    bundle = (await db.execute(
-        select(EvidenceBundle).where(EvidenceBundle.prediction_id == r.id)
-    )).scalar_one_or_none()
-
+def _prediction_dict_sync(r: Prediction, bundle: "EvidenceBundle | None") -> dict:
     return {
         "uuid":               r.uuid,
         "prediction_type":    r.prediction_type,

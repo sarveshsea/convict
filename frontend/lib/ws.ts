@@ -11,6 +11,7 @@ export type WSMessageType =
   | "event_detected"
   | "pipeline_status"
   | "baseline_updated"
+  | "vlm_analysis"
 
 export interface WSMessage<T = unknown> {
   type: WSMessageType
@@ -58,7 +59,9 @@ class ConvictWS {
 
     this.ws.onclose = () => {
       if (this.shouldConnect) {
-        this.reconnectTimer = setTimeout(() => this._open(), 3000)
+        // Jitter prevents thundering herd when backend restarts
+        const delay = 2000 + Math.random() * 2000
+        this.reconnectTimer = setTimeout(() => this._open(), delay)
       }
     }
 

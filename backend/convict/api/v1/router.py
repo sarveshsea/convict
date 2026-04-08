@@ -1,8 +1,9 @@
 from fastapi import APIRouter
-from convict.api.v1 import tank, fish, zones, schedules, stream, observations, tank_config
+from convict.api.v1 import tank, fish, zones, schedules, stream, observations, tank_config, auth
 
 router = APIRouter(prefix="/api/v1")
 
+router.include_router(auth.router)
 router.include_router(tank.router)
 router.include_router(fish.router)
 router.include_router(zones.router)
