@@ -39,6 +39,7 @@ interface ObservationState {
   scheduleContext: string | null
   nightMode: boolean
   pipeline: PipelineStatus
+  pipelineStartedAt: string | null   // ISO timestamp — set when camera_active first becomes true
   cam2Entities: LiveEntity[]
   cam2FrameWidth: number
   cam2FrameHeight: number
@@ -54,7 +55,7 @@ const defaultPipeline: PipelineStatus = {
   queue_lag_frames: 0,
 }
 
-export const useObservationStore = create<ObservationState>((set) => ({
+export const useObservationStore = create<ObservationState>((set, get) => ({
   entities: [],
   frameSeq: 0,
   frameWidth: 1280,
@@ -62,12 +63,21 @@ export const useObservationStore = create<ObservationState>((set) => ({
   scheduleContext: null,
   nightMode: false,
   pipeline: defaultPipeline,
+  pipelineStartedAt: null,
   cam2Entities: [],
   cam2FrameWidth: 1280,
   cam2FrameHeight: 720,
   setObservationFrame: (entities, seq, ctx, fw, fh, nightMode) =>
     set({ entities, frameSeq: seq, scheduleContext: ctx, frameWidth: fw, frameHeight: fh, nightMode }),
-  setPipelineStatus: (pipeline) => set({ pipeline }),
+  setPipelineStatus: (pipeline) => set((state) => {
+    const startedAt =
+      pipeline.camera_active && !state.pipeline.camera_active
+        ? new Date().toISOString()   // camera just came online — record start time
+        : !pipeline.camera_active
+        ? null                       // camera offline — clear
+        : state.pipelineStartedAt    // keep existing
+    return { pipeline, pipelineStartedAt: startedAt }
+  }),
   setCam2ObservationFrame: (cam2Entities, cam2FrameWidth, cam2FrameHeight) =>
     set({ cam2Entities, cam2FrameWidth, cam2FrameHeight }),
 }))

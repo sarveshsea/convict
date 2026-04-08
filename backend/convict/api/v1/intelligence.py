@@ -110,22 +110,11 @@ async def get_relationships(
             "edges": [],
         }
 
-    # ── Aggregate edges by fish pair ───────────────────────────────────
-    # Collect all fish ids involved
-    fish_db_ids: set[int] = set()
-    for e in edge_rows:
-        fish_db_ids.add(e.fish_a_id)
-        fish_db_ids.add(e.fish_b_id)
-
-    fish_rows = (await db.execute(
-        select(KnownFish).where(KnownFish.id.in_(fish_db_ids))
-    )).scalars().all()
-    fish_by_id = {f.id: f for f in fish_rows}
-
-    # Also fetch all active fish for complete node list
+    # ── Fetch all active fish (single query — used for both lookup and node list) ──
     all_fish = (await db.execute(
         select(KnownFish).where(KnownFish.is_active == True)
     )).scalars().all()
+    fish_by_id = {f.id: f for f in all_fish}
 
     # Aggregate: (fish_a_uuid, fish_b_uuid) → counts by type + initiator counts
     pair_counts:    dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))

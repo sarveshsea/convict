@@ -1,21 +1,22 @@
 "use client"
-import { useEffect, useState } from "react"
 import type { BehaviorEvent } from "@/lib/api"
-import { getRelationships } from "@/lib/api"
 import { SEVERITY_COLORS } from "@/lib/constants"
 import { formatDistanceToNow } from "@/lib/timeUtils"
 import { EmptyState } from "@/components/ui/empty-state"
-
-interface Props {
-  events: BehaviorEvent[]
-  fishUuid: string
-  fishName: string
-}
 
 type RelEdge = {
   fish_a_id: string; fish_b_id: string
   weight: number; dominant_type: string
   harassment_count: number; proximity_count: number; schooling_count: number
+}
+
+interface Props {
+  events: BehaviorEvent[]
+  fishUuid: string
+  fishName: string
+  // Relationship data passed down from parent — avoids a redundant API call
+  edges: RelEdge[]
+  nodeNames: Record<string, string>
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -31,27 +32,7 @@ const TYPE_BAR: Record<string, string> = {
   avoidance:  "bg-amber-400",
 }
 
-export function InteractionHistory({ events, fishUuid, fishName }: Props) {
-  const [edges, setEdges]           = useState<RelEdge[]>([])
-  const [nodeNames, setNodeNames]   = useState<Record<string, string>>({})
-  const [edgeLoading, setEdgeLoading] = useState(true)
-
-  useEffect(() => {
-    getRelationships(168)  // last 7 days
-      .then((r) => {
-        const nameMap: Record<string, string> = {}
-        r.nodes.forEach((n: { id: string; name: string }) => { nameMap[n.id] = n.name })
-        setNodeNames(nameMap)
-        // Filter edges involving this fish
-        const mine = r.edges.filter(
-          (e: RelEdge) => e.fish_a_id === fishUuid || e.fish_b_id === fishUuid
-        )
-        setEdges(mine)
-      })
-      .catch(() => {})
-      .finally(() => setEdgeLoading(false))
-  }, [fishUuid])
-
+export function InteractionHistory({ events, fishUuid, fishName, edges, nodeNames }: Props) {
   // ── Interaction edge summary ─────────────────────────────────────────
   const hasEdges = edges.length > 0
   const maxWeight = Math.max(...edges.map((e) => e.weight), 1)
@@ -73,9 +54,7 @@ export function InteractionHistory({ events, fishUuid, fishName }: Props) {
       {/* ── Relationship edges (new persistent data) ─────────────────── */}
       <div className="space-y-2">
         <p className="text-label text-muted-foreground">Interaction Edges — last 7 days</p>
-        {edgeLoading ? (
-          <div className="h-8 animate-pulse rounded bg-muted/40" />
-        ) : !hasEdges ? (
+        {!hasEdges ? (
           <p className="text-caption text-muted-foreground italic">no persistent interactions recorded yet</p>
         ) : (
           <div className="space-y-1.5">
@@ -168,7 +147,7 @@ export function InteractionHistory({ events, fishUuid, fishName }: Props) {
         </div>
       )}
 
-      {events.length === 0 && !hasEdges && !edgeLoading && (
+      {events.length === 0 && !hasEdges && (
         <EmptyState message="no interactions recorded yet" height="lg" />
       )}
     </div>

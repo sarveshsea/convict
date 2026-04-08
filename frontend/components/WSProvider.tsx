@@ -69,6 +69,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         if (msg.payload?.anomalies?.length) {
           msg.payload.anomalies.forEach((a: any) => addAnomaly(a))
         }
+        // Signal TopStrip badge — fires the DOM event it listens for
+        window.dispatchEvent(new CustomEvent("vlm_analysis"))
       }),
       convictWS.on<any>("community_health", (msg: WSMessage<any>) => {
         if (msg.payload) setCommunityHealth(msg.payload)
