@@ -101,20 +101,22 @@ class PipelineOrchestrator:
         from convict.engines.intelligence.auto_registrar     import AutoRegistrar
         from convict.engines.experience.prediction_engine    import PredictionEngine
         from convict.database                                import AsyncSessionLocal
-        from convict.engines.knowledge.tank_knowledge_engine import list_zones, list_fish, get_tank
+        from convict.engines.knowledge.tank_knowledge_engine import list_zones, list_fish, get_tank, list_schedules
 
         loop    = asyncio.get_running_loop()
         frame_q: asyncio.Queue = asyncio.Queue(maxsize=2)
 
         # ---- Load known world -----------------------------------------
-        zones: list = []
-        fish:  list = []
+        zones:     list = []
+        fish:      list = []
+        schedules: list = []
         tank = None
         try:
             async with AsyncSessionLocal() as db:
-                tank  = await get_tank(db)
-                zones = await list_zones(db)
-                fish  = await list_fish(db)
+                tank      = await get_tank(db)
+                zones     = await list_zones(db)
+                fish      = await list_fish(db)
+                schedules = await list_schedules(db)
         except Exception:
             pass
 
@@ -270,6 +272,7 @@ class PipelineOrchestrator:
                     new_events = anomaly.update(entities)
                     for ev in new_events:
                         predictor.record_event(ev)
+                        ev["schedule_context"] = _nearest_schedule(schedules)
                         await broadcaster.broadcast({
                             "type":      "anomaly_flagged",
                             "timestamp": ev["started_at"],
@@ -555,6 +558,37 @@ class PipelineOrchestrator:
         finally:
             cam2.stop()
             log.info("Camera 2 stopped")
+
+
+def _nearest_schedule(schedules: list) -> dict | None:
+    """
+    Returns the closest scheduled event to now (within ±30 min) or None.
+    Result: {"event_type": "feeding", "minutes_offset": -5}
+      negative offset = event was N minutes ago
+      positive offset = event is N minutes away
+    """
+    if not schedules:
+        return None
+    from datetime import datetime as _dt
+    now   = _dt.now()
+    today = now.strftime("%a").lower()  # "mon", "tue", …
+    best  = None
+    best_abs = float("inf")
+
+    for s in schedules:
+        days = s.days_of_week if isinstance(s.days_of_week, list) else []
+        if days and today not in [d.lower()[:3] for d in days]:
+            continue
+        try:
+            h, m  = map(int, s.time_of_day.split(":"))
+        except Exception:
+            continue
+        offset = (h * 60 + m) - (now.hour * 60 + now.minute)
+        if abs(offset) < best_abs and abs(offset) <= 30:
+            best_abs = abs(offset)
+            best = {"event_type": s.event_type, "minutes_offset": offset}
+
+    return best
 
 
 async def _persist_interaction_edges(pending: list[dict], db) -> None:

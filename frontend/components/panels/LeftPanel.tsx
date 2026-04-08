@@ -680,23 +680,38 @@ function IntelTab() {
               <span className="text-label">all clear</span>
             </div>
           ) : <EmptyState message="none flagged" height="sm" />
-        ) : anomalies.slice(0, 15).map((a) => (
-          <div key={a.uuid} className="px-3 py-2.5 border-t border-border/40">
-            <div className="flex items-center justify-between mb-1">
-              <span className={`text-label px-1.5 py-0.5 rounded border ${SEVERITY_COLORS[a.severity] ?? "text-zinc-400 border-border"}`}>
-                {a.event_type.replace(/_/g, " ")}
-              </span>
-              <span className="text-caption text-muted-foreground">{formatDistanceToNow(a.started_at)} ago</span>
-            </div>
-            {a.involved_fish.length > 0 && (
-              <div className="flex gap-1 flex-wrap mt-1">
-                {a.involved_fish.map((f) => (
-                  <span key={f.fish_id} className="text-caption text-muted-foreground">{f.fish_name}</span>
-                ))}
+        ) : anomalies.slice(0, 15).map((a: any) => {
+          const sc = a.schedule_context as { event_type: string; minutes_offset: number } | null | undefined
+          const scLabel = sc
+            ? sc.minutes_offset <= 0
+              ? `${Math.abs(sc.minutes_offset)}m after ${sc.event_type.replace(/_/g, " ")}`
+              : `${sc.minutes_offset}m before ${sc.event_type.replace(/_/g, " ")}`
+            : null
+          return (
+            <div key={a.uuid} className="px-3 py-2.5 border-t border-border/40">
+              <div className="flex items-center justify-between mb-1">
+                <span className={`text-label px-1.5 py-0.5 rounded border ${SEVERITY_COLORS[a.severity] ?? "text-zinc-400 border-border"}`}>
+                  {a.event_type.replace(/_/g, " ")}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {scLabel && (
+                    <span className="text-label text-amber-400/70 border border-amber-400/20 rounded px-1 py-0.5">
+                      {scLabel}
+                    </span>
+                  )}
+                  <span className="text-caption text-muted-foreground">{formatDistanceToNow(a.started_at)} ago</span>
+                </div>
               </div>
-            )}
-          </div>
-        ))}
+              {a.involved_fish.length > 0 && (
+                <div className="flex gap-1 flex-wrap mt-1">
+                  {a.involved_fish.map((f: any) => (
+                    <span key={f.fish_id} className="text-caption text-muted-foreground">{f.fish_name}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
