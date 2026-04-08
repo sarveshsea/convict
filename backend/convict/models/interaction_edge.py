@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Integer, String, Float, Boolean, DateTime, ForeignKey
+from sqlalchemy import Index, Integer, String, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from convict.database import Base
 
@@ -16,6 +16,18 @@ class InteractionEdge(Base):
       "avoidance"  — one fish consistently moves away from the other
     """
     __tablename__ = "interaction_edges"
+
+    __table_args__ = (
+        # Composite index for querying all interactions between a specific pair
+        # of fish filtered by interaction type and ordered by time.
+        Index(
+            "ix_interaction_edges_pair_type_time",
+            "fish_a_id",
+            "fish_b_id",
+            "interaction_type",
+            "occurred_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uuid: Mapped[str] = mapped_column(

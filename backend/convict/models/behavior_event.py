@@ -1,12 +1,25 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Integer, String, Float, DateTime, ForeignKey, func
+from sqlalchemy import Index, Integer, String, Float, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 from convict.database import Base
 
 
 class BehaviorEvent(Base):
     __tablename__ = "behavior_events"
+
+    __table_args__ = (
+        # Composite index for the prediction engine, which queries behavior
+        # events scoped to a tank ordered by recency every 5 minutes.
+        # Note: involved_fish is a JSON string and cannot be indexed as a FK;
+        # tank_id is the narrowest indexed scope available for per-fish lookups.
+        Index(
+            "ix_behavior_events_tank_occurred_at",
+            "tank_id",
+            "occurred_at",
+            postgresql_ops={"occurred_at": "DESC"},
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uuid: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()), nullable=False)
