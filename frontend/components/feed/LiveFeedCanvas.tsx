@@ -402,12 +402,10 @@ function CameraPane({
       )}
 
       {!streamOk && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/80">
-          <div className="h-2 w-2 rounded-full bg-zinc-600" />
-          <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-            Camera offline
-          </span>
-          <span className="text-[9px] font-mono text-zinc-600">{label}</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60">
+          <div className="h-2 w-2 rounded-full bg-status-unknown" />
+          <span className="text-label text-muted-foreground">Camera offline</span>
+          <span className="text-label text-muted-foreground/40">{label}</span>
         </div>
       )}
     </div>
@@ -422,12 +420,31 @@ export function LiveFeedCanvas() {
   const nightMode       = useObservationStore((s) => s.nightMode)
   const pipelineActive  = useObservationStore((s) => s.pipeline.camera_active)
   const cam2Active      = useObservationStore((s) => s.pipeline.cam2_active)
+  const pipelineRunning = useObservationStore((s) => s.pipeline.running)
   const cam2Entities    = useObservationStore((s) => s.cam2Entities)
   const cam2FrameWidth  = useObservationStore((s) => s.cam2FrameWidth)
   const cam2FrameHeight = useObservationStore((s) => s.cam2FrameHeight)
 
   return (
-    <div className="absolute inset-0 flex gap-px bg-zinc-800/80 p-px">
+    <div className="absolute inset-0 flex gap-px bg-border/20 p-px">
+      {/* Offline ambient backdrop */}
+      {!pipelineRunning && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3
+          bg-[radial-gradient(ellipse_100%_70%_at_50%_30%,oklch(0.12_0.015_245),oklch(0.08_0.005_245))]
+          pointer-events-none">
+          <div className="flex flex-col items-center gap-2 opacity-20">
+            <svg width="120" height="70" viewBox="0 0 120 70" fill="none" className="text-primary">
+              <rect x="10" y="10" width="80" height="50" stroke="currentColor" strokeWidth="1" opacity="0.6"/>
+              <rect x="30" y="4" width="80" height="50" stroke="currentColor" strokeWidth="1" opacity="0.4"/>
+              <line x1="10" y1="10" x2="30" y2="4" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+              <line x1="90" y1="10" x2="110" y2="4" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+              <line x1="10" y1="60" x2="30" y2="54" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+              <line x1="90" y1="60" x2="110" y2="54" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
+            </svg>
+            <span className="text-label text-muted-foreground">pipeline offline</span>
+          </div>
+        </div>
+      )}
       {/* Cam 1 — annotated detection feed */}
       <CameraPane
         src={STREAM_URL}
@@ -443,7 +460,7 @@ export function LiveFeedCanvas() {
       {/* Cam 2 — only shown when backend confirms it's streaming */}
       {cam2Active && (
         <>
-          <div className="w-px shrink-0 bg-zinc-700/80" />
+          <div className="w-px shrink-0 bg-border/60" />
           <CameraPane
             src={STREAM_URL_2}
             label="Cam 2"
