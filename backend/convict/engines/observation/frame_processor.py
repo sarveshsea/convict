@@ -22,6 +22,14 @@ from convict.engines.observation.mjpeg_streamer import streamer as _default_stre
 from convict.engines.observation.nxt_sensor import nxt_manager
 from convict.engines.experience.ws_broadcaster import broadcaster
 
+# HLS streamers — imported lazily to avoid startup errors if ffmpeg is absent
+def _get_hls_streamer(camera_index: int):
+    try:
+        from convict.engines.observation.hls_streamer import hls_streamer, hls_streamer2
+        return hls_streamer if camera_index == 0 else hls_streamer2
+    except Exception:
+        return None
+
 
 class FrameProcessor:
     def __init__(
@@ -103,6 +111,11 @@ class FrameProcessor:
         )
 
         await self._streamer.push(jpeg_bytes)
+
+        # Push the same JPEG bytes to the HLS pipeline (no-op if ffmpeg unavailable)
+        hls = _get_hls_streamer(self._camera_index)
+        if hls is not None:
+            await hls.push(jpeg_bytes)
 
         # Save per-fish snapshots for identified entities (debounced — 60s min interval)
         if any(e["identity"]["fish_id"] for e in entities):

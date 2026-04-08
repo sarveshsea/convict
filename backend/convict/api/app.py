@@ -24,6 +24,13 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     await orchestrator.stop()
+    # Cleanly terminate ffmpeg HLS processes (no-op if ffmpeg was never started)
+    try:
+        from convict.engines.observation.hls_streamer import hls_streamer, hls_streamer2
+        hls_streamer.stop()
+        hls_streamer2.stop()
+    except Exception:
+        pass
 
 
 app = FastAPI(

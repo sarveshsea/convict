@@ -1,7 +1,7 @@
 "use client"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { STREAM_URL, STREAM_URL_2, fishSnapshotUrl } from "@/lib/constants"
+import { STREAM_URL, STREAM_URL_2, HLS_URL, HLS_URL_2, fishSnapshotUrl } from "@/lib/constants"
 import { useObservationStore } from "@/store/observationStore"
 import { useTankStore } from "@/store/tankStore"
 import type { LiveEntity } from "@/store/observationStore"
@@ -14,7 +14,7 @@ function HalftoneCanvas() {
     const canvas = ref.current!
     const ctx = canvas.getContext("2d")!
     const dpr = window.devicePixelRatio || 1
-    let W = 0, H = 0, raf = 0, t = 0
+    let W = 0, H = 0, raf = 0, t = 0, scanY = 0
     const GAP = 11
 
     const resize = () => {
@@ -61,27 +61,40 @@ function HalftoneCanvas() {
 
       const cols  = Math.ceil(W / GAP) + 1
       const rows  = Math.ceil(H / GAP) + 1
-      const MAX_R = (GAP / 2) * 0.82
-      const SC    = 0.048   // grid → noise coordinate scale
+      const MAX_R = (GAP / 2) * 0.78
+      const SC    = 0.042   // grid → noise coordinate scale
 
       for (let c = 0; c < cols; c++) {
         for (let r = 0; r < rows; r++) {
           const x = c * GAP
           const y = r * GAP
-          // Domain warp: sample coordinates are bent by a second FBM
-          // → completely destroys any grid/wave regularity
-          const wx = fbm(c * SC + t * 0.21,       r * SC + t * 0.13      ) * 2.8
-          const wy = fbm(c * SC - t * 0.17 + 5.3, r * SC + t * 0.09 + 1.9) * 2.8
+          // Domain warp — reduced amplitude avoids extreme clustering
+          const wx = fbm(c * SC + t * 0.21,       r * SC + t * 0.13      ) * 1.5
+          const wy = fbm(c * SC - t * 0.17 + 5.3, r * SC + t * 0.09 + 1.9) * 1.5
           const n  = fbm(c * SC + wx + t * 0.08,  r * SC + wy - t * 0.06 )
-          // Cubic curve: small values vanish, bright values pop
-          const k  = n * n * n
-          if (k < 0.04) continue
+          // Quadratic + floor: uniform field of small dots, larger in bright areas
+          const k  = n * n * 0.82 + 0.08
           ctx.beginPath()
           ctx.arc(x, y, k * MAX_R, 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(240,240,248,${(k * 0.9).toFixed(2)})`
+          ctx.fillStyle = `rgba(160,185,255,${(k * 0.55).toFixed(2)})`
           ctx.fill()
         }
       }
+
+      // Scan line — slow horizontal sweep (18s period)
+      scanY = (scanY + 1.8) % H
+      const sy = Math.floor(scanY)
+      const grad = ctx.createLinearGradient(0, 0, W, 0)
+      grad.addColorStop(0,   "rgba(100,150,255,0)")
+      grad.addColorStop(0.3, "rgba(100,150,255,0.18)")
+      grad.addColorStop(0.7, "rgba(100,150,255,0.18)")
+      grad.addColorStop(1,   "rgba(100,150,255,0)")
+      ctx.fillStyle = grad
+      ctx.fillRect(0, sy, W, 1)
+      // Soft glow 2px above/below
+      ctx.fillStyle = "rgba(100,150,255,0.06)"
+      ctx.fillRect(0, sy - 1, W, 1)
+      ctx.fillRect(0, sy + 1, W, 1)
       raf = requestAnimationFrame(draw)
     }
 
@@ -105,7 +118,7 @@ function OfflineCard() {
     { label: "MODE",   value: "STANDBY" },
   ]
   return (
-    <div className="absolute right-10 top-1/2 -translate-y-1/2 w-60 bg-black/70 border border-white/10 backdrop-blur-md p-6 space-y-3">
+    <div className="absolute right-12 bottom-12 w-56 bg-black/70 border border-white/10 backdrop-blur-md p-5 space-y-3">
       {rows.map(({ label, value }) => (
         <div key={label} className="flex items-center gap-3">
           <span className="text-label text-white/35 w-14 shrink-0">{label}</span>

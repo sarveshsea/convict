@@ -3,6 +3,16 @@ export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/api
 export const STREAM_URL  = `${API_BASE}/api/v1/stream/video`
 export const STREAM_URL_2 = `${API_BASE}/api/v1/stream/video2`
 
+/** HLS playlist URLs — served from /tmp/convict_hls by the backend.
+ *  Requires ffmpeg on the backend host and the hls.js package on the frontend.
+ *  Install hls.js: `npm install hls.js` (and `npm install --save-dev @types/hls.js`)
+ */
+export const HLS_URL   = `${API_BASE}/api/v1/stream/hls/stream.m3u8`
+export const HLS_URL_2 = `${API_BASE}/api/v1/stream/hls2/stream.m3u8`
+
+/** Backend endpoint to probe HLS availability before mounting the player. */
+export const HLS_STATUS_URL = `${API_BASE}/api/v1/stream/hls-status`
+
 /** Latest saved profile crop for a known fish (backend writes snapshots periodically). */
 export function fishSnapshotUrl(fishUuid: string, cacheBust?: string | number) {
   const q = cacheBust != null ? `?t=${cacheBust}` : ""
