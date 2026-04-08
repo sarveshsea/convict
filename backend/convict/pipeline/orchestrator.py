@@ -270,15 +270,27 @@ class PipelineOrchestrator:
 
                 try:
                     new_events = anomaly.update(entities)
-                    for ev in new_events:
-                        predictor.record_event(ev)
-                        ev["schedule_context"] = _nearest_schedule(schedules)
-                        await broadcaster.broadcast({
-                            "type":      "anomaly_flagged",
-                            "timestamp": ev["started_at"],
-                            "seq":       0,
-                            "payload":   ev,
-                        })
+                    if new_events:
+                        tank_id = tank.id if tank else None
+                        async with AsyncSessionLocal() as db:
+                            for ev in new_events:
+                                predictor.record_event(ev)
+                                ev["schedule_context"] = _nearest_schedule(schedules)
+                                if tank_id:
+                                    await _persist_behavior_event(ev, tank_id, db)
+                                await broadcaster.broadcast({
+                                    "type":      "anomaly_flagged",
+                                    "timestamp": ev["started_at"],
+                                    "seq":       0,
+                                    "payload":   ev,
+                                })
+                            try:
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+                    else:
+                        for ev in new_events:
+                            predictor.record_event(ev)
                 except Exception:
                     log.exception("Anomaly update/broadcast error")
 
@@ -589,6 +601,28 @@ def _nearest_schedule(schedules: list) -> dict | None:
             best = {"event_type": s.event_type, "minutes_offset": offset}
 
     return best
+
+
+async def _persist_behavior_event(ev: dict, tank_id: int, db) -> None:
+    """Write one anomaly event dict to the behavior_events table (no commit — caller commits)."""
+    import json as _json
+    from datetime import datetime as _dt
+    from convict.models.behavior_event import BehaviorEvent
+    try:
+        occurred = _dt.fromisoformat(ev["started_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        occurred = _dt.utcnow()
+    row = BehaviorEvent(
+        uuid          = ev["uuid"],
+        tank_id       = tank_id,
+        event_type    = ev["event_type"],
+        severity      = ev.get("severity", "low"),
+        occurred_at   = occurred,
+        involved_fish = _json.dumps(ev.get("involved_fish", [])),
+        zone_id       = ev.get("zone_id"),
+        notes         = ev.get("description"),
+    )
+    db.add(row)
 
 
 async def _persist_interaction_edges(pending: list[dict], db) -> None:
