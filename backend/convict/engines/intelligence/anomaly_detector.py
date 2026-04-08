@@ -81,7 +81,7 @@ class AnomalyDetector:
         # Pending interaction edges -- drained by orchestrator via pop_interactions()
         self._pending_interactions: list[dict] = []
 
-        # ── New: vision-only water quality / health signals ───────────────────
+        # ── Vision-only water quality / health signals ───────────────────────
         # Rolling centroid y-values for surface-gathering detection
         self._centroid_ys: deque = deque(maxlen=600)
         # Cooldown counters (in check-interval ticks, not raw frames)
@@ -90,7 +90,19 @@ class AnomalyDetector:
         # fish_uuid -> consecutive erratic check cycles
         self._erratic_counts: dict[str, int] = defaultdict(int)
 
+        # ── Feeding anticipation ──────────────────────────────────────────────
+        # Schedules injected by orchestrator; checked at each anomaly interval
+        self._schedules:        list = []
+        # Track whether we already fired a feeding_indifference event for this
+        # feeding window (reset when no feeding is imminent any more)
+        self._feeding_checked:  bool = False
+        self._feeding_indiff_cooldown: int = 0
+
     # ------------------------------------------------------------------
+
+    def update_schedules(self, schedules: list) -> None:
+        """Called by orchestrator when schedules are loaded/refreshed."""
+        self._schedules = schedules
 
     def update_known_fish(self, fish: list) -> None:
         self._fish = fish
@@ -298,6 +310,38 @@ class AnomalyDetector:
                 ))
                 self._surface_cooldown = 120
 
+        # ── Feeding anticipation (indifference = health warning) ────────
+        # Fires when a feeding is due in ≤5 minutes but fish are showing
+        # below-baseline activity (not clustering/begging). This is an early
+        # sign of illness, stress, or appetite loss.
+        if self._feeding_indiff_cooldown > 0:
+            self._feeding_indiff_cooldown -= 1
+        feed_mins = _minutes_to_next_feeding(self._schedules)
+        if feed_mins is not None and 0 <= feed_mins <= 5:
+            if not self._feeding_checked and self._feeding_indiff_cooldown == 0 and len(ident) >= 2:
+                sluggish, active = 0, 0
+                for e in ident:
+                    fid   = e["identity"]["fish_id"]
+                    mean, std = self._baseline.speed_stats(fid)
+                    speed = e.get("speed_px_per_frame", 0.0)
+                    if std >= 0.3:
+                        if speed < mean - 0.5 * std:
+                            sluggish += 1
+                        else:
+                            active += 1
+                total = sluggish + active
+                if total >= 2 and sluggish / total >= 0.60:
+                    events.append(self._make(
+                        "feeding_indifference", "medium",
+                        [{"fish_id": e["identity"]["fish_id"],
+                          "fish_name": e["identity"]["fish_name"]}
+                         for e in ident],
+                    ))
+                    self._feeding_indiff_cooldown = 600   # don't re-fire for 10min
+                self._feeding_checked = True
+        else:
+            self._feeding_checked = False
+
         return events
 
     # ------------------------------------------------------------------
@@ -337,6 +381,35 @@ class AnomalyDetector:
             "involved_fish": involved,
             "zone_id":       None,
         }
+
+
+def _minutes_to_next_feeding(schedules: list) -> float | None:
+    """
+    Returns minutes until the next feeding event today, or None if no feeding
+    is scheduled within the next 30 minutes.
+    Negative return = feeding was in the past (within last 30 min).
+    """
+    from datetime import datetime as _dt
+    if not schedules:
+        return None
+    now   = _dt.now()
+    today = now.strftime("%a").lower()[:3]
+    best  = None
+    for s in schedules:
+        if s.event_type != "feeding":
+            continue
+        days = s.days_of_week if isinstance(s.days_of_week, list) else []
+        if days and today not in [d.lower()[:3] for d in days]:
+            continue
+        try:
+            h, m = map(int, s.time_of_day.split(":"))
+        except Exception:
+            continue
+        offset = (h * 60 + m) - (now.hour * 60 + now.minute)
+        if -30 <= offset <= 30:
+            if best is None or abs(offset) < abs(best):
+                best = float(offset)
+    return best
 
 
 def _initiator(ea: dict, eb: dict) -> str | None:

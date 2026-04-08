@@ -46,11 +46,18 @@ class FrameProcessor:
         self._latency_ring: deque[float] = deque(maxlen=30)
         self._is_night: bool = False
 
+        # Overlay data written by orchestrator, read in _render_jpeg (GIL-safe)
+        self._overlay: dict = {}
+
     def update_zones(self, zones: list) -> None:
         self._zones = zones
 
     def set_identity_resolver(self, resolver: Any) -> None:
         self._resolver = resolver
+
+    def set_overlay(self, data: dict) -> None:
+        """Thread-safe (CPython GIL) — called by orchestrator between frames."""
+        self._overlay = data
 
     # ------------------------------------------------------------------
 
@@ -276,13 +283,54 @@ class FrameProcessor:
     # ------------------------------------------------------------------
 
     def _render_jpeg(self, frame: np.ndarray, entities: list[dict]) -> bytes:
+        overlay = self._overlay  # single dict read = GIL-atomic
+        H, W    = frame.shape[:2]
+
+        prespawn_fish    = overlay.get("prespawn_fish",    set())
+        feeding_imminent = overlay.get("feeding_imminent", None)  # {"minutes": N}
+        flow_vectors     = overlay.get("flow_vectors",     [])
+        flow_status      = overlay.get("flow_status",      "ok")
+        clarity          = overlay.get("clarity",          1.0)
+        clarity_status   = overlay.get("clarity_status",   "ok")
+
+        # ── 1. Flow arrows (background) ───────────────────────────────
+        # Scale displacements so even slow flows are visible at ≥5px
+        if flow_vectors:
+            arrow_col = (52, 211, 153) if flow_status == "ok" else (251, 146, 60)
+            for (px, py, dx, dy) in flow_vectors:
+                # Amplify: scale so 0.5px/frame shows as 5px arrow
+                scale = max(1, int(5 / max(abs(dx), abs(dy), 0.1)))
+                scale = min(scale, 8)
+                ex = int(px + dx * scale)
+                ey = int(py + dy * scale)
+                if 0 <= px < W and 0 <= py < H and 0 <= ex < W and 0 <= ey < H:
+                    cv2.arrowedLine(frame, (px, py), (ex, ey),
+                                    arrow_col, 1, cv2.LINE_AA, tipLength=0.4)
+
+        # ── 2. Feeding imminent banner (top of frame) ─────────────────
+        if feeding_imminent is not None:
+            mins = feeding_imminent.get("minutes", 0)
+            label = f"feeding in {int(mins)}m" if mins > 0 else "feeding now"
+            # Semi-transparent amber strip
+            banner = frame.copy()
+            cv2.rectangle(banner, (0, 0), (W, 22), (0, 0, 0), -1)
+            cv2.addWeighted(banner, 0.50, frame, 0.50, 0, frame)
+            cv2.putText(frame, label, (8, 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.44,
+                        (251, 191, 36), 1, cv2.LINE_AA)
+
+        # ── 3. Fish brackets + labels ─────────────────────────────────
         for e in entities:
             x1, y1, x2, y2 = [int(v) for v in e["bbox"]]
             ident = e["identity"]
             conf  = ident.get("confidence", 0.0)
+            fid   = ident["fish_id"]
 
-            # Colour by identity confidence
-            if ident["fish_id"]:
+            # Colour by identity confidence; orange override for pre-spawn
+            if fid and fid in prespawn_fish:
+                colour = (30, 144, 255)       # deep orange-ish in BGR = (30,144,255) → actually let's use (60,130,240) which looks orange
+                colour = (20, 120, 245)       # BGR orange
+            elif fid:
                 if conf >= 0.7:
                     colour = (52, 211, 153)   # emerald
                 elif conf >= 0.4:
@@ -292,7 +340,6 @@ class FrameProcessor:
             else:
                 colour = (100, 200, 255)      # unidentified — blue
 
-            # Corner brackets instead of full rectangle
             clen = max(8, min((x2 - x1) // 5, (y2 - y1) // 5, 18))
             for (px, py, dx, dy) in [
                 (x1, y1,  1,  1), (x2, y1, -1,  1),
@@ -300,6 +347,10 @@ class FrameProcessor:
             ]:
                 cv2.line(frame, (px, py), (px + dx * clen, py), colour, 2, cv2.LINE_AA)
                 cv2.line(frame, (px, py), (px, py + dy * clen), colour, 2, cv2.LINE_AA)
+
+            # Pre-spawn dot indicator
+            if fid and fid in prespawn_fish:
+                cv2.circle(frame, (x2 - 4, y1 + 4), 3, (20, 120, 245), -1, cv2.LINE_AA)
 
             label = (
                 f"{ident['fish_name']} {conf*100:.0f}%"
@@ -309,7 +360,26 @@ class FrameProcessor:
             cv2.putText(frame, label, (x1, max(y1 - 6, 14)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.48, colour, 1, cv2.LINE_AA)
 
-            # Trails rendered in frontend canvas overlay — skip here to avoid doubling
+        # ── 4. HUD chip (bottom-left) ─────────────────────────────────
+        hud_y      = H - 8
+        hud_h      = 34
+        hud_w      = 170
+        hud_panel  = frame.copy()
+        cv2.rectangle(hud_panel, (4, H - hud_h - 4), (4 + hud_w, H - 4), (0, 0, 0), -1)
+        cv2.addWeighted(hud_panel, 0.55, frame, 0.45, 0, frame)
+
+        flow_col = (52, 211, 153) if flow_status == "ok" else (251, 146, 60)
+        flow_txt = f"flow {flow_status}"
+        cv2.putText(frame, flow_txt, (8, H - hud_h + 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, flow_col, 1, cv2.LINE_AA)
+
+        clar_pct = int(clarity * 100)
+        clar_col = (52, 211, 153) if clar_pct >= 65 else (251, 191, 36) if clar_pct >= 45 else (244, 63, 94)
+        clar_txt = f"clarity {clar_pct}%"
+        if clarity_status == "degrading":
+            clar_txt += " !"
+        cv2.putText(frame, clar_txt, (8, H - hud_h + 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, clar_col, 1, cv2.LINE_AA)
 
         ret, buf = cv2.imencode(
             ".jpg", frame,

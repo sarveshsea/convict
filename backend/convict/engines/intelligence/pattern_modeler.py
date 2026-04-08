@@ -2,20 +2,21 @@
 Pattern modeler — runs every 5 minutes over recent baseline data.
 
 Detects multi-fish behavioral patterns using cross-correlation, zone
-co-occurrence, circadian rhythm analysis, and proximity data.
+co-occurrence, circadian rhythm analysis, proximity data, and coloration shifts.
 
 Pattern types:
   schooling           — multiple fish show correlated speed changes
   territory_defense   — one fish shows high speed + zone exclusivity
   circadian_deviation — fish active/inactive at unexpected hours vs baseline
   pair_bonding        — two fish consistently proximate, low aggression between them
+  prespawn_coloration — HSV histogram of fish has shifted toward orange/red vs baseline
 """
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import numpy as np
 
@@ -26,8 +27,20 @@ class PatternModeler:
         self._fish     = known_fish
         self._baseline = baseline_builder
 
+        # fish_uuid → deque of recent HSV histogram bytes (from identity_resolver)
+        # Updated per-frame by orchestrator when a fish is identified at ≥0.65 conf
+        self._color_obs: dict[str, deque] = defaultdict(lambda: deque(maxlen=30))
+
     def update_known_fish(self, fish: list) -> None:
         self._fish = fish
+
+    def record_color_observation(self, fish_uuid: str, histogram_bytes: bytes) -> None:
+        """
+        Called by orchestrator every frame for each confidently-identified fish.
+        Stores the raw HSV histogram bytes so _detect_prespawn_coloration can
+        compare them against the stored baseline at the next run().
+        """
+        self._color_obs[fish_uuid].append(histogram_bytes)
 
     async def run(self, db) -> list[dict]:
         """
@@ -40,6 +53,7 @@ class PatternModeler:
         patterns += await self._detect_territory_defense(db)
         patterns += await self._detect_circadian_deviation(db)
         patterns += await self._detect_pair_bonding(db)
+        patterns += await self._detect_prespawn_coloration(db)
 
         return patterns
 
@@ -278,6 +292,87 @@ class PatternModeler:
                 )
                 if p:
                     results.append(p)
+
+        return results
+
+    async def _detect_prespawn_coloration(self, db) -> list[dict]:
+        """
+        Compares each fish's recent HSV color histogram against the stored
+        baseline. A shift of hue weight toward orange/red (OpenCV H ≈ 0-20
+        and 155-180) relative to baseline signals pre-spawn coloration change —
+        common in cichlids, bettas, many tetras, and livebearers before spawning.
+
+        Requires:
+          • ≥15 recent color observations accumulated since last run()
+          • A stored color_histogram in KnownFish (set by identity_resolver)
+          • A meaningful hue shift score > 0.08 (8% of histogram mass moved
+            toward warm hues relative to baseline)
+        """
+        results: list[dict] = []
+
+        for fish in self._fish:
+            obs = self._color_obs.get(fish.uuid)
+            if not obs or len(obs) < 15:
+                continue
+            if fish.color_histogram is None:
+                continue
+
+            # Stored baseline histogram (18×16 = 288 bins, H×S)
+            stored = np.frombuffer(fish.color_histogram, dtype=np.float32)
+            if stored.shape[0] != 288:
+                continue
+
+            # Average the recent observations
+            recent_arrays = []
+            for hb in obs:
+                arr = np.frombuffer(hb, dtype=np.float32)
+                if arr.shape[0] == 288:
+                    recent_arrays.append(arr)
+            if len(recent_arrays) < 10:
+                continue
+            recent = np.mean(recent_arrays, axis=0)
+
+            # The histogram is 18×16: 18 hue bins × 16 saturation bins.
+            # Bin 0 = H 0-10°, bin 17 = H 170-180°.
+            # "Warm" = bins 0-1 (red-orange) and bin 17 (wraps back to red).
+            hist_2d_stored = stored.reshape(18, 16)
+            hist_2d_recent = recent.reshape(18, 16)
+
+            # Sum saturation axis → 18-element hue profile
+            hue_stored = hist_2d_stored.sum(axis=1)
+            hue_recent = hist_2d_recent.sum(axis=1)
+
+            # Warm-hue mass = bins 0, 1, 17 (0-20° and 170-180°)
+            warm_idx = [0, 1, 17]
+            warm_stored = float(hue_stored[warm_idx].sum())
+            warm_recent = float(hue_recent[warm_idx].sum())
+
+            # Shift score: how much more warm-hue mass relative to baseline
+            shift = warm_recent - warm_stored   # signed; positive = warmer
+            if shift <= 0.08:
+                continue
+
+            # Also require that the fish has a reasonably high saturation
+            # (pre-spawn coloration = vivid, not just washed-out noise)
+            sat_profile_recent = recent.reshape(18, 16).sum(axis=0)
+            high_sat = float(sat_profile_recent[8:].sum())   # top half of sat range
+            if high_sat < 0.15:
+                continue
+
+            p = await self._upsert_pattern(
+                db,
+                fish_id      = fish.uuid,
+                pattern_type = "prespawn_coloration",
+                signature    = {
+                    "warm_hue_shift":  round(shift, 3),
+                    "warm_frac_now":   round(warm_recent, 3),
+                    "warm_frac_base":  round(warm_stored, 3),
+                    "high_sat_frac":   round(high_sat, 3),
+                },
+                confidence   = round(min(shift / 0.25, 0.90), 2),
+            )
+            if p:
+                results.append(p)
 
         return results
 

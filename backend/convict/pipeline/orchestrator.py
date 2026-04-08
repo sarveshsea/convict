@@ -106,6 +106,7 @@ class PipelineOrchestrator:
         from convict.engines.intelligence.pattern_modeler    import PatternModeler
         from convict.engines.intelligence.auto_registrar     import AutoRegistrar
         from convict.engines.experience.prediction_engine    import PredictionEngine
+        from convict.engines.intelligence.flow_analyzer      import FlowAnalyzer
         from convict.database                                import AsyncSessionLocal
         from convict.engines.knowledge.tank_knowledge_engine import list_zones, list_fish, get_tank, list_schedules
 
@@ -170,6 +171,9 @@ class PipelineOrchestrator:
         patterns  = PatternModeler(settings, fish, baseline)
         predictor = PredictionEngine(settings, fish, anomaly, baseline, resolver)
         health    = CommunityHealthScorer(settings, fish, baseline)
+        flow      = FlowAnalyzer(settings)
+
+        anomaly.update_schedules(schedules)
 
         processor = FrameProcessor(camera, detector, tracker, zones,
                                    identity_resolver=resolver)
@@ -184,6 +188,9 @@ class PipelineOrchestrator:
         self._predictor  = predictor
         self._health     = health
         self._fish_list  = fish
+        self._flow       = flow
+        # Prespawn fish UUIDs — updated by _predict_loop, read by overlay builder
+        self._prespawn_fish: set[str] = set()
 
         camera.start()
 
@@ -242,6 +249,12 @@ class PipelineOrchestrator:
                         predictor._fish = fish
                         health.update_known_fish(fish)
                         self._fish_list = fish
+                        # Re-sync schedules too (cheap)
+                        async with AsyncSessionLocal() as db:
+                            from convict.engines.knowledge.tank_knowledge_engine import list_schedules as _ls
+                            schedules = await _ls(db)
+                        self._schedules = schedules
+                        anomaly.update_schedules(schedules)
                     except Exception:
                         log.exception("Fish list refresh failed")
                     last_fish_refresh = now_mono
@@ -273,6 +286,45 @@ class PipelineOrchestrator:
                             })
                     except Exception:
                         log.exception("Auto-registrar error")
+
+                # ── Flow analysis + feed overlay ───────────────────────
+                try:
+                    await asyncio.to_thread(flow.update, frame, entities)
+                    flow_events = flow.pop_events()
+                    if flow_events:
+                        async with AsyncSessionLocal() as db:
+                            for ev in flow_events:
+                                predictor.record_event(ev)
+                                ev["schedule_context"] = _nearest_schedule(schedules)
+                                if tank:
+                                    await _persist_behavior_event(ev, tank.id, db)
+                                await broadcaster.broadcast({
+                                    "type":      "anomaly_flagged",
+                                    "timestamp": ev["started_at"],
+                                    "seq":       0,
+                                    "payload":   ev,
+                                })
+                            try:
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
+
+                    # Build overlay: merge flow data + prespawn set + feeding banner
+                    _overlay = flow.get_overlay()
+                    _overlay["prespawn_fish"]    = self._prespawn_fish
+                    _overlay["feeding_imminent"] = _feeding_imminent_banner(schedules)
+                    processor.set_overlay(_overlay)
+
+                    # Color observations for prespawn detection
+                    for _e in entities:
+                        _fid  = _e["identity"].get("fish_id")
+                        _conf = _e["identity"].get("confidence", 0.0)
+                        if _fid and _conf >= 0.65:
+                            _hist = resolver.extract_histogram(frame, _e["bbox"])
+                            if _hist:
+                                patterns.record_color_observation(_fid, _hist)
+                except Exception:
+                    log.exception("Flow/overlay error")
 
                 try:
                     baseline.update(entities)
@@ -381,6 +433,16 @@ class PipelineOrchestrator:
                         from convict.engines.intelligence.species_guesser import SpeciesGuesser
                         self._species_guesser = SpeciesGuesser()
                     species_updates = await self._species_guesser.run(db)
+
+                # Keep prespawn fish set fresh for overlay coloring
+                if hasattr(self, "_prespawn_fish"):
+                    fresh_prespawn = {
+                        p["fish_id"]
+                        for p in new_patterns
+                        if p.get("pattern_type") == "prespawn_coloration"
+                    }
+                    if fresh_prespawn:
+                        self._prespawn_fish = fresh_prespawn
 
                 for u in species_updates:
                     await broadcaster.broadcast({
@@ -662,6 +724,32 @@ class PipelineOrchestrator:
         finally:
             cam2.stop()
             log.info("Camera 2 stopped")
+
+
+def _feeding_imminent_banner(schedules: list) -> dict | None:
+    """
+    Returns {"minutes": N} if a feeding event is within the next 5 minutes,
+    or None otherwise. Used by the frame overlay banner.
+    """
+    from datetime import datetime as _dt
+    if not schedules:
+        return None
+    now   = _dt.now()
+    today = now.strftime("%a").lower()[:3]
+    for s in schedules:
+        if s.event_type != "feeding":
+            continue
+        days = s.days_of_week if isinstance(s.days_of_week, list) else []
+        if days and today not in [d.lower()[:3] for d in days]:
+            continue
+        try:
+            h, m = map(int, s.time_of_day.split(":"))
+        except Exception:
+            continue
+        offset = (h * 60 + m) - (now.hour * 60 + now.minute)
+        if 0 <= offset <= 5:
+            return {"minutes": offset}
+    return None
 
 
 def _nearest_schedule(schedules: list) -> dict | None:
