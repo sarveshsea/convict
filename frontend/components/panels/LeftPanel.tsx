@@ -283,10 +283,14 @@ function AddFishInline() {
 function RosterTab() {
   const fish     = useTankStore((s) => s.fish)
   const entities = useObservationStore((s) => s.entities)
-  const [sort, setSort] = useState<SortKey>("name")
+  const [sort,   setSort]   = useState<SortKey>("name")
+  const [search, setSearch] = useState("")
 
   const activeFish = useMemo(() => {
-    const list = fish.filter((f) => f.is_active)
+    const q    = search.trim().toLowerCase()
+    const list = fish.filter((f) => f.is_active && (
+      !q || f.name.toLowerCase().includes(q) || f.species.toLowerCase().includes(q)
+    ))
     if (sort === "confidence") {
       return [...list].sort((a, b) => {
         const ca = entities.find((e) => e.identity?.fish_id === a.uuid)?.identity?.confidence ?? 0
@@ -296,9 +300,10 @@ function RosterTab() {
     }
     if (sort === "species") return [...list].sort((a, b) => a.species.localeCompare(b.species))
     return [...list].sort((a, b) => a.name.localeCompare(b.name))
-  }, [fish, entities, sort])
+  }, [fish, entities, sort, search])
 
-  const unresolved = entities.filter((e) => !e.identity?.fish_id)
+  const unresolved    = entities.filter((e) => !e.identity?.fish_id)
+  const trackedCount  = entities.filter((e) => e.identity?.fish_id).length
 
   function entityForFish(f: KnownFish): LiveEntity | undefined {
     return entities.find((e) => e.identity?.fish_id === f.uuid)
@@ -306,25 +311,31 @@ function RosterTab() {
 
   return (
     <div className="flex flex-col h-full">
-      {activeFish.length > 1 && (
-        <div className="px-3 py-1.5 border-b border-border/40 flex items-center gap-1 shrink-0">
-          <span className="text-label text-muted-foreground mr-1">sort</span>
+      {/* Search + sort toolbar */}
+      <div className="px-3 py-1.5 border-b border-border/40 flex items-center gap-2 shrink-0">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="search…"
+          className="flex-1 min-w-0 bg-transparent text-caption text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+        />
+        {trackedCount > 0 && (
+          <span className="text-label text-emerald-400 shrink-0" title="Currently tracked">{trackedCount} live</span>
+        )}
+        <div className="flex gap-0.5 shrink-0">
           {(["name", "confidence", "species"] as SortKey[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSort(s)}
-              className={`text-label px-1.5 py-0.5 rounded transition-colors ${
-                sort === s ? "text-primary border border-primary/30 bg-primary/5" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {s === "confidence" ? "↑conf" : s}
+            <button key={s} onClick={() => setSort(s)}
+              className={`text-label px-1 py-0.5 rounded transition-colors ${
+                sort === s ? "text-primary" : "text-muted-foreground hover:text-foreground"
+              }`} title={s}>
+              {s === "name" ? "A↓" : s === "confidence" ? "↑%" : "sp"}
             </button>
           ))}
         </div>
-      )}
+      </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin min-h-0">
         {activeFish.length === 0
-          ? <EmptyState message="watching…" />
+          ? <EmptyState message="no fish registered" />
           : activeFish.map((f) => <FishRow key={f.uuid} fish={f} entity={entityForFish(f)} />)
         }
 
@@ -395,7 +406,7 @@ function SnapshotsTab() {
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
         {fish.length === 0
-          ? <EmptyState message="no fish yet" />
+          ? <EmptyState message="no snapshots yet" />
           : (
             <div className={`grid gap-2 ${cols === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
               {fish.map((f) => (
@@ -731,6 +742,9 @@ export function LeftPanel() {
   })
   const isAuthed = useIsAuthed()
   const { checkStatus } = useAuthStore()
+  const fish      = useTankStore((s) => s.fish)
+  const anomalyCnt = usePredictionStore((s) => s.anomalies.length)
+  const predCnt    = usePredictionStore((s) => s.predictions.filter(p => p.status === "active").length)
 
   useEffect(() => { checkStatus() }, [])
 
@@ -760,12 +774,9 @@ export function LeftPanel() {
   }
 
   return (
-    <aside className="w-[520px] shrink-0 flex flex-col border-r border-border/40 bg-background overflow-hidden pointer-events-auto">
-      <div className="px-4 py-3 border-b border-border/40 shrink-0 flex items-center justify-between">
-        <div>
-          <span className="text-label text-muted-foreground block">Convict</span>
-          <span className="text-lg font-medium tracking-tight leading-tight">Tank Intelligence</span>
-        </div>
+    <aside className="w-[440px] shrink-0 flex flex-col border-r border-border/40 bg-background overflow-hidden pointer-events-auto">
+      <div className="px-3 py-2 border-b border-border/40 shrink-0 flex items-center justify-between h-10">
+        <span className="text-caption text-muted-foreground font-medium tracking-wide">Tank Intelligence</span>
         <button onClick={() => setCollapsed(true)} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded">
           <ChevronLeft size={15} />
         </button>
@@ -774,12 +785,21 @@ export function LeftPanel() {
       <div className="flex items-center border-b border-border/40 shrink-0 px-1 pt-1">
         {TABS.map(({ key, Icon, label }) => {
           const isGated = GATED_TABS.includes(key) && !isAuthed
+          const badge = key === "roster" ? fish.filter(f => f.is_active).length
+            : key === "intel" ? (anomalyCnt + predCnt)
+            : 0
           return (
             <button key={key} onClick={() => switchTab(key)}
               className={`flex items-center gap-1.5 px-3 py-2 text-caption border-b-2 -mb-px transition-colors
                 ${tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
               <Icon size={13} />
               {label}
+              {badge > 0 && (
+                <span className={`text-label rounded-full px-1 leading-none ${
+                  key === "intel" && (anomalyCnt + predCnt) > 0
+                    ? "text-amber-400" : "text-muted-foreground"
+                }`}>{badge}</span>
+              )}
               {isGated && <Lock size={9} className="text-muted-foreground/50 ml-0.5" />}
             </button>
           )
