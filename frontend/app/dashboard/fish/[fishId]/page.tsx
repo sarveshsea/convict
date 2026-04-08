@@ -165,7 +165,7 @@ export default function FishDrilldown() {
       <div className="bg-card border border-border rounded p-4">
         {tab === "heatmap"      && <ZoneHeatmap zoneTimeFractions={heatmap} zones={zones} />}
         {tab === "baseline"     && <BehaviorBaseline baseline={baseline} />}
-        {tab === "interactions" && <InteractionHistory events={events} />}
+        {tab === "interactions" && <InteractionHistory events={events} fishUuid={fish.uuid} fishName={fish.name} />}
         {tab === "speed"        && <IdentityConfidenceChart history={history} />}
         {tab === "evidence"     && <EvidenceChain fishUuid={fish.uuid} fishName={fish.name} />}
       </div>
