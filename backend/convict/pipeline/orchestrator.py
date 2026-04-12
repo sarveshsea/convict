@@ -125,7 +125,7 @@ class PipelineOrchestrator:
                 fish      = await list_fish(db)
                 schedules = await list_schedules(db)
         except Exception:
-            pass
+            log.exception("Failed to load known world (tank/zones/fish/schedules) at startup")
 
         self._schedules = schedules
 
@@ -138,7 +138,8 @@ class PipelineOrchestrator:
                 async with AsyncSessionLocal() as db:
                     await auto_registrar.initialize(db)
             except Exception:
-                pass
+                log.exception("AutoRegistrar.initialize failed — auto-discovery disabled")
+                auto_registrar = None
 
         # ---- Build engines --------------------------------------------
         if settings.mock_camera:
@@ -307,6 +308,7 @@ class PipelineOrchestrator:
                             try:
                                 await db.commit()
                             except Exception:
+                                log.exception("Flow event commit failed — rolling back")
                                 await db.rollback()
 
                     # Build overlay: merge flow data + prespawn set + feeding banner
@@ -353,6 +355,7 @@ class PipelineOrchestrator:
                             try:
                                 await db.commit()
                             except Exception:
+                                log.exception("Anomaly event commit failed — rolling back")
                                 await db.rollback()
                 except Exception:
                     log.exception("Anomaly update/broadcast error")
@@ -361,7 +364,7 @@ class PipelineOrchestrator:
                     async with AsyncSessionLocal() as db:
                         await baseline.maybe_flush(db)
                 except Exception:
-                    pass
+                    log.exception("Baseline flush error")
 
                 try:
                     self._frame_times.append(time.monotonic())
@@ -373,7 +376,7 @@ class PipelineOrchestrator:
                     self._inference_latency_ms = processor.last_latency_ms
                     self._track_count          = tracker.active_track_count
                 except Exception:
-                    pass
+                    log.debug("Frame timing telemetry update failed", exc_info=True)
 
                 try:
                     now = time.monotonic()
@@ -867,6 +870,7 @@ async def _persist_interaction_edges(pending: list[dict], db) -> None:
         try:
             await _db.commit()
         except Exception:
+            log.exception("Interaction edge commit failed — rolling back")
             await _db.rollback()
 
 

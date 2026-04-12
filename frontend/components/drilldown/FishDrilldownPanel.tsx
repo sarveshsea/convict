@@ -100,8 +100,13 @@ export function FishDrilldownPanel({ fishId }: Props) {
   const [relEdges,     setRelEdges]     = useState<any[]>([])
   const [relNodeNames, setRelNodeNames] = useState<Record<string, string>>({})
 
-  // Reset state whenever fishId changes
+  // Reset state whenever fishId changes.
+  // The `cancelled` flag prevents stale fetches from overwriting fresher state
+  // when the user rapidly switches fish — without it, the slower in-flight
+  // Promise.all from the previous fishId would race the newer one and could
+  // win, painting wrong-fish data into the panel.
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     setError(null)
     setSummary(null)
@@ -116,6 +121,7 @@ export function FishDrilldownPanel({ fishId }: Props) {
           getFishConfidenceHistory(fishId),
           getRelationships(168).catch(() => ({ nodes: [], edges: [] })),
         ])
+        if (cancelled) return
         setSummary(sum)
         setHeatmap(hm.zone_time_fractions)
         setEvents(evts)
@@ -123,14 +129,16 @@ export function FishDrilldownPanel({ fishId }: Props) {
         const nameMap: Record<string, string> = {}
         rel.nodes.forEach((n: { id: string; name: string }) => { nameMap[n.id] = n.name })
         setRelNodeNames(nameMap)
-        setRelEdges(rel.edges.filter((e: any) => e.fish_a_id === fishId || e.fish_b_id === fishId))
-      } catch (e: any) {
-        setError(e.message ?? "Failed to load fish")
+        setRelEdges(rel.edges.filter((e: { fish_a_id: string; fish_b_id: string }) => e.fish_a_id === fishId || e.fish_b_id === fishId))
+      } catch (e: unknown) {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : "Failed to load fish")
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
   }, [fishId])
 
   if (loading) {

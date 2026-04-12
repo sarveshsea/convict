@@ -51,12 +51,12 @@ async def verify_password(body: PasswordIn):
     Frontend stores this in sessionStorage — no cookies needed.
     """
     admin = settings.admin_password or ""
-    if not admin:
-        # No password set — auth is disabled, always grant access
+    if not admin and settings.dev_mode:
+        # Explicit dev mode — auth disabled, always grant access
         ts = int(time.time())
         return {"token": f"{ts}.{_make_token(ts)}", "auth_disabled": True}
 
-    if not hmac.compare_digest(body.password, admin):
+    if not admin or not hmac.compare_digest(body.password, admin):
         raise HTTPException(status_code=401, detail="Wrong password")
 
     ts = int(time.time())
@@ -66,4 +66,7 @@ async def verify_password(body: PasswordIn):
 @router.get("/status")
 async def auth_status():
     """Lets the frontend know whether a password is configured at all."""
-    return {"password_required": bool(settings.admin_password)}
+    return {
+        "password_required": bool(settings.admin_password) and not settings.dev_mode,
+        "dev_mode": settings.dev_mode,
+    }

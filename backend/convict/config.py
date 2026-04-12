@@ -14,7 +14,8 @@ class Settings(BaseSettings):
 
     # Server
     api_port: int = 8000
-    admin_password: str = ""  # set ADMIN_PASSWORD=yourpassword in .env.local; empty = no auth
+    admin_password: str = ""  # set ADMIN_PASSWORD=yourpassword in .env.local
+    dev_mode: bool = False    # set DEV_MODE=1 to explicitly run with no auth (single-user local dev only)
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"]
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

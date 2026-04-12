@@ -9,6 +9,7 @@ Every baseline_flush_interval_frames: writes a snapshot to behavior_baselines.
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict, deque
 from datetime import datetime
 
@@ -16,6 +17,9 @@ import numpy as np
 
 # Fish within this pixel distance are considered "in proximity"
 _PROXIMITY_PX = 80
+# Minimum confident speed samples before we'll persist a baseline.
+# Below this, mean/stddev are not statistically meaningful.
+_MIN_BASELINE_SAMPLES = 30
 
 
 class BaselineBuilder:
@@ -88,12 +92,19 @@ class BaselineBuilder:
         from convict.models.behavior_baseline import BehaviorBaseline
 
         for fid, total in self._totals.items():
-            if total < 30:
-                continue  # not enough data for a meaningful baseline
+            speeds = self._speeds.get(fid)
+            # Gate on the actual sample count, not the frame counter — protects
+            # against any drift between _totals and _speeds and ensures the
+            # mean/stddev are statistically meaningful.
+            if not speeds or len(speeds) < _MIN_BASELINE_SAMPLES:
+                continue
 
-            speeds   = self._speeds.get(fid, [])
-            mean_spd = float(np.mean(speeds)) if speeds else 0.0
-            std_spd  = float(np.std(speeds))  if len(speeds) > 1 else 0.0
+            mean_spd = float(np.mean(speeds))
+            std_spd  = float(np.std(speeds))
+            # Belt-and-braces: never persist NaN/inf (would corrupt downstream
+            # anomaly thresholds that read these as floats).
+            if not (math.isfinite(mean_spd) and math.isfinite(std_spd)):
+                continue
 
             zone_frac = {
                 z: c / total

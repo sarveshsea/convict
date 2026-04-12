@@ -1,4 +1,5 @@
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,10 +15,38 @@ logging.basicConfig(
 # Keep log volume configurable for lower-power machines.
 logging.getLogger("convict").setLevel(getattr(logging, settings.log_level, logging.INFO))
 
+log = logging.getLogger("convict.startup")
+
+
+def _ensure_admin_password() -> None:
+    """
+    Auth policy:
+      - admin_password set         → use it
+      - empty + DEV_MODE=1         → log a warning, allow no-auth (explicit opt-in)
+      - empty + DEV_MODE unset     → generate a one-shot password, print it loudly
+    Prevents the silent "no auth" failure mode where a missing .env.local
+    leaves the API open without anyone realizing.
+    """
+    if settings.admin_password:
+        return
+    if settings.dev_mode:
+        log.warning("DEV_MODE=1 — running with NO authentication. Do not expose this server to the network.")
+        return
+    generated = secrets.token_urlsafe(12)
+    settings.admin_password = generated
+    banner = "=" * 60
+    log.warning(banner)
+    log.warning("ADMIN_PASSWORD not set — generated a one-shot password:")
+    log.warning("    %s", generated)
+    log.warning("Add ADMIN_PASSWORD=... to backend/.env.local to make it permanent,")
+    log.warning("or set DEV_MODE=1 to disable auth entirely.")
+    log.warning(banner)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    _ensure_admin_password()
     await init_db()
     from convict.pipeline.orchestrator import orchestrator
     await orchestrator.start()
@@ -34,7 +63,7 @@ async def lifespan(app: FastAPI):
         hls_streamer.stop()
         hls_streamer2.stop()
     except Exception:
-        pass
+        log.exception("HLS streamer shutdown failed")
 
 
 app = FastAPI(

@@ -21,6 +21,12 @@ interface UIStore {
   timelineOpen: boolean
   openTimeline: () => void
   closeTimeline: () => void
+
+  // Surfaced startup errors — set by WSProvider when REST bootstrap fails so
+  // the user can see "backend unreachable" instead of an empty/silently-broken
+  // dashboard.
+  bootstrapError: string | null
+  setBootstrapError: (msg: string | null) => void
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -41,4 +47,7 @@ export const useUIStore = create<UIStore>((set) => ({
   timelineOpen: false,
   openTimeline: () => set({ timelineOpen: true }),
   closeTimeline: () => set({ timelineOpen: false }),
+
+  bootstrapError: null,
+  setBootstrapError: (msg) => set({ bootstrapError: msg }),
 }))
