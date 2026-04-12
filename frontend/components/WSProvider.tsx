@@ -6,7 +6,6 @@ import { usePredictionStore } from "@/store/predictionStore"
 import { useTankStore } from "@/store/tankStore"
 import { useUIStore } from "@/store/uiStore"
 import { getTank, listFish, getCommunityHealth } from "@/lib/api"
-import type { WSMessage } from "@/lib/ws"
 
 export function WSProvider({ children }: { children: React.ReactNode }) {
   const { setObservationFrame, setPipelineStatus, setCam2ObservationFrame } = useObservationStore()
@@ -44,9 +43,9 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     convictWS.connect()
 
     const unsubs = [
-      convictWS.on<any>("observation_frame", (msg: WSMessage<any>) => {
+      convictWS.on("observation_frame", (msg) => {
         const knownFish = useTankStore.getState().fish
-        const enriched = (msg.payload.entities ?? []).map((e: any) => {
+        const enriched = (msg.payload.entities ?? []).map((e) => {
           if (e.identity?.fish_id) {
             const f = knownFish.find((kf) => kf.uuid === e.identity.fish_id)
             if (f) return { ...e, identity: { ...e.identity, species: f.species ?? null } }
@@ -71,39 +70,35 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
           )
         }
       }),
-      convictWS.on<any>("pipeline_status", (msg: WSMessage<any>) => {
+      convictWS.on("pipeline_status", (msg) => {
         setPipelineStatus(msg.payload)
       }),
-      convictWS.on<any>("anomaly_flagged", (msg: WSMessage<any>) => {
+      convictWS.on("anomaly_flagged", (msg) => {
         addAnomaly(msg.payload)
       }),
-      convictWS.on<any>("prediction_created", (msg: WSMessage<any>) => {
+      convictWS.on("prediction_created", (msg) => {
         upsertPrediction(msg.payload)
       }),
-      convictWS.on<any>("prediction_updated", (msg: WSMessage<any>) => {
+      convictWS.on("prediction_updated", (msg) => {
         upsertPrediction(msg.payload)
       }),
-      convictWS.on<any>("fish_updated", () => {
+      convictWS.on("fish_updated", () => {
         // Auto-detected fish created or species guessed — refresh the roster
         listFish().then((f) => {
           setFish(f)
-          // A successful refresh means the backend recovered — clear any
-          // lingering bootstrap banner so the user knows things are fine now.
           if (useUIStore.getState().bootstrapError) setBootstrapError(null)
         }).catch((e: unknown) => {
           // eslint-disable-next-line no-console
           console.warn("[WSProvider] fish refresh failed:", e)
         })
       }),
-      convictWS.on<any>("vlm_analysis", (msg: WSMessage<any>) => {
-        // Feed VLM anomalies into the prediction store so they appear in the Intel tab
+      convictWS.on("vlm_analysis", (msg) => {
         if (msg.payload?.anomalies?.length) {
-          msg.payload.anomalies.forEach((a: any) => addAnomaly(a))
+          msg.payload.anomalies.forEach((a) => addAnomaly(a))
         }
-        // Signal TopStrip badge — fires the DOM event it listens for
         window.dispatchEvent(new CustomEvent("vlm_analysis"))
       }),
-      convictWS.on<any>("community_health", (msg: WSMessage<any>) => {
+      convictWS.on("community_health", (msg) => {
         if (msg.payload) setCommunityHealth(msg.payload)
       }),
     ]

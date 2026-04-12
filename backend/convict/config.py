@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     aggression_streak_threshold: int = 3
     isolation_window_threshold: int = 3
 
+    # Retention (days; 0 = disabled)
+    retention_behavior_events_days:   int = 30
+    retention_interaction_edges_days: int = 14
+    retention_detection_frame_days:   int = 7
+    retention_run_hour: int = 3   # local time of day to run nightly purge
+
     # Smart plugs (TP-Link Kasa — requires: pip install python-kasa)
     # Set in .env.local — leave empty to disable
     kasa_plug_1_ip:    str = ""          # e.g. 192.168.1.100

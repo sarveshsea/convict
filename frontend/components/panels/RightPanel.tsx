@@ -38,15 +38,14 @@ function ConfidenceRing({ value, type }: { value: number; type: string }) {
 // ─── Horizon countdown bar ────────────────────────────────────────────────────
 
 function HorizonBar({ expiresAt, horizonMinutes }: { expiresAt: string; horizonMinutes: number }) {
-  const [pct, setPct] = useState(() => {
-    const rem = (new Date(expiresAt).getTime() - Date.now()) / 60_000
-    return Math.max(0, Math.min(1, rem / horizonMinutes))
-  })
+  const [pct, setPct] = useState(0)
   useEffect(() => {
-    const id = setInterval(() => {
+    const compute = () => {
       const rem = (new Date(expiresAt).getTime() - Date.now()) / 60_000
       setPct(Math.max(0, Math.min(1, rem / horizonMinutes)))
-    }, 10_000)
+    }
+    compute()
+    const id = setInterval(compute, 10_000)
     return () => clearInterval(id)
   }, [expiresAt, horizonMinutes])
   return (

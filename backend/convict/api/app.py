@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -48,12 +49,22 @@ async def lifespan(app: FastAPI):
     # Startup
     _ensure_admin_password()
     await init_db()
+    from convict.pipeline.db_writer import db_writer
     from convict.pipeline.orchestrator import orchestrator
+    from convict.pipeline.retention import retention_loop
     await orchestrator.start()
+    await db_writer.start()
+    retention_task = asyncio.create_task(retention_loop(), name="retention")
     from convict.engines.control.device_controller import controller as device_controller
     await device_controller.initialize()
     yield
     # Shutdown
+    retention_task.cancel()
+    try:
+        await retention_task
+    except (asyncio.CancelledError, Exception):
+        pass
+    await db_writer.stop()
     await orchestrator.stop()
     from convict.engines.control.device_controller import controller as device_controller
     await device_controller.shutdown()

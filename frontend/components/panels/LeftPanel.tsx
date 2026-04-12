@@ -1,8 +1,8 @@
 "use client"
-import { useState, useRef, useEffect, useMemo } from "react"
+import React, { useState, useRef, useEffect, useMemo } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown, Lock } from "lucide-react"
+import { ChevronLeft, ChevronRight, Users2, SlidersHorizontal, LayoutGrid, Activity, X, Plus, ChevronDown, Lock, HeartPulse } from "lucide-react"
 import { useTankStore } from "@/store/tankStore"
 import { useObservationStore } from "@/store/observationStore"
 import { usePredictionStore } from "@/store/predictionStore"
@@ -15,9 +15,11 @@ import { ConfidenceBar } from "@/components/ui/confidence-bar"
 import { EmptyState } from "@/components/ui/empty-state"
 import { SectionHeader } from "@/components/ui/section-header"
 import type { KnownFish } from "@/lib/api"
-import type { LiveEntity } from "@/store/observationStore"
 import type { PredictionItem } from "@/store/predictionStore"
 import { formatDistanceToNow } from "@/lib/timeUtils"
+import { HealthTab } from "@/components/panels/HealthTab"
+import { ClarityTrend } from "@/components/intel/ClarityTrend"
+import { TransitionMatrix } from "@/components/intel/TransitionMatrix"
 
 const TankConfigurator3D = dynamic(
   () => import("@/components/tank/TankConfigurator3D").then(m => m.TankConfigurator3D),
@@ -28,7 +30,7 @@ const TankConfigurator3D = dynamic(
   )},
 )
 
-type Tab = "roster" | "config" | "snapshots" | "intel"
+type Tab = "roster" | "config" | "snapshots" | "intel" | "health"
 type SortKey = "name" | "confidence" | "species"
 
 const TABS: { key: Tab; Icon: typeof Users2; label: string }[] = [
@@ -36,6 +38,7 @@ const TABS: { key: Tab; Icon: typeof Users2; label: string }[] = [
   { key: "roster",    Icon: Users2,            label: "Roster"    },
   { key: "snapshots", Icon: LayoutGrid,         label: "Snapshots" },
   { key: "intel",     Icon: Activity,           label: "Intel"     },
+  { key: "health",    Icon: HeartPulse,         label: "Health"    },
 ]
 
 function extractCommon(species: string): string {
@@ -96,9 +99,14 @@ function AuthGate() {
 
 // ─── Fish Row ─────────────────────────────────────────────────────────────────
 
-function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undefined }) {
-  const conf      = entity?.identity?.confidence ?? 0
-  const isTracked = !!entity
+interface FishRowProps {
+  fish: KnownFish
+  isTracked: boolean
+  liveConf: number
+}
+
+const FishRow = React.memo(function FishRow({ fish, isTracked, liveConf }: FishRowProps) {
+  const conf      = liveConf
   const { removeFish } = useTankStore()
   const { openFishModal } = useUIStore()
   const [deleting, setDeleting]         = useState(false)
@@ -165,7 +173,15 @@ function FishRow({ fish, entity }: { fish: KnownFish; entity: LiveEntity | undef
       </button>
     </div>
   )
-}
+}, (prev, next) =>
+  prev.fish.uuid === next.fish.uuid &&
+  prev.fish.name === next.fish.name &&
+  prev.fish.species === next.fish.species &&
+  prev.fish.temperament === next.fish.temperament &&
+  prev.fish.auto_detected === next.fish.auto_detected &&
+  prev.isTracked === next.isTracked &&
+  Math.abs(prev.liveConf - next.liveConf) < 0.05
+)
 
 // ─── Add Fish Inline ──────────────────────────────────────────────────────────
 
@@ -288,6 +304,18 @@ function RosterTab() {
   const [sort,   setSort]   = useState<SortKey>("name")
   const [search, setSearch] = useState("")
 
+  // Derive a stable map of tracked fish_id -> confidence ONCE per entities change.
+  // This prevents per-fish array scans during render and lets FishRow's React.memo
+  // skip re-renders when nothing it cares about has changed.
+  const trackedConf = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const e of entities) {
+      const fid = e.identity?.fish_id
+      if (fid) m.set(fid, e.identity?.confidence ?? 0)
+    }
+    return m
+  }, [entities])
+
   const activeFish = useMemo(() => {
     const q    = search.trim().toLowerCase()
     const list = fish.filter((f) => f.is_active && (
@@ -295,14 +323,14 @@ function RosterTab() {
     ))
     if (sort === "confidence") {
       return [...list].sort((a, b) => {
-        const ca = entities.find((e) => e.identity?.fish_id === a.uuid)?.identity?.confidence ?? 0
-        const cb = entities.find((e) => e.identity?.fish_id === b.uuid)?.identity?.confidence ?? 0
+        const ca = trackedConf.get(a.uuid) ?? 0
+        const cb = trackedConf.get(b.uuid) ?? 0
         return cb - ca
       })
     }
     if (sort === "species") return [...list].sort((a, b) => a.species.localeCompare(b.species))
     return [...list].sort((a, b) => a.name.localeCompare(b.name))
-  }, [fish, entities, sort, search])
+  }, [fish, trackedConf, sort, search])
 
   const groupedBySpecies = useMemo(() => {
     if (sort !== "species") return null
@@ -316,11 +344,7 @@ function RosterTab() {
   }, [activeFish, sort])
 
   const unresolved    = entities.filter((e) => !e.identity?.fish_id)
-  const trackedCount  = entities.filter((e) => e.identity?.fish_id).length
-
-  function entityForFish(f: KnownFish): LiveEntity | undefined {
-    return entities.find((e) => e.identity?.fish_id === f.uuid)
-  }
+  const trackedCount  = trackedConf.size
 
   return (
     <div className="flex flex-col h-full">
@@ -356,10 +380,16 @@ function RosterTab() {
                   <span className="text-label text-muted-foreground">{species}</span>
                   <span className="text-label text-muted-foreground/50">{group.length}</span>
                 </div>
-                {group.map((f) => <FishRow key={f.uuid} fish={f} entity={entityForFish(f)} />)}
+                {group.map((f) => {
+                  const lc = trackedConf.get(f.uuid)
+                  return <FishRow key={f.uuid} fish={f} isTracked={lc !== undefined} liveConf={lc ?? 0} />
+                })}
               </div>
             ))
-          : activeFish.map((f) => <FishRow key={f.uuid} fish={f} entity={entityForFish(f)} />)
+          : activeFish.map((f) => {
+              const lc = trackedConf.get(f.uuid)
+              return <FishRow key={f.uuid} fish={f} isTracked={lc !== undefined} liveConf={lc ?? 0} />
+            })
         }
 
         {unresolved.length > 0 && (
@@ -776,6 +806,8 @@ function IntelTab() {
     <div className="flex flex-col divide-y divide-border/40 overflow-y-auto scrollbar-thin">
       <WaterQualityAlert />
       <HealthCard />
+      <ClarityTrend />
+      <TransitionMatrix />
       <RelationshipSection />
       <IncidentSection />
 
@@ -969,6 +1001,7 @@ export function LeftPanel() {
             {tab === "config"    && <ConfigTab />}
             {tab === "snapshots" && <SnapshotsTab />}
             {tab === "intel"     && <IntelTab />}
+            {tab === "health"    && <HealthTab />}
           </>
         )}
       </div>

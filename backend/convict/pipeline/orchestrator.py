@@ -46,6 +46,9 @@ class PipelineOrchestrator:
         self._track_count:          int   = 0
         self._frame_times:          deque = deque(maxlen=10)
 
+        # Per-task last-tick monotonic timestamps for the /health endpoint
+        self._task_heartbeats: dict[str, float] = {}
+
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
@@ -90,6 +93,21 @@ class PipelineOrchestrator:
             "identity_resolution_health": id_health,
             "queue_lag_frames":           0,
         }
+
+    def task_health(self) -> dict[str, dict]:
+        """Returns task name → {alive, last_tick_ago_s} for the health endpoint."""
+        now = time.monotonic()
+        out: dict[str, dict] = {}
+        for name, t in self._task_heartbeats.items():
+            out[name] = {"alive": True, "last_tick_ago_s": round(now - t, 1)}
+        expected = {"pipeline", "predictor", "watchdog"}
+        if settings.vlm_enabled:
+            expected.add("vlm")
+        if settings.camera_index_2 >= 0:
+            expected.add("camera2")
+        for name in expected - set(out):
+            out[name] = {"alive": False, "last_tick_ago_s": None}
+        return out
 
     # ------------------------------------------------------------------
     # Main per-frame loop
@@ -218,6 +236,7 @@ class PipelineOrchestrator:
 
         try:
             while self._running:
+                self._task_heartbeats["pipeline"] = time.monotonic()
                 try:
                     frame = await asyncio.wait_for(frame_q.get(), timeout=1.0)
                 except asyncio.TimeoutError:
@@ -250,6 +269,16 @@ class PipelineOrchestrator:
                         predictor._fish = fish
                         health.update_known_fish(fish)
                         self._fish_list = fish
+                        # Prune stale per-fish state from in-memory engines
+                        known = {f.uuid for f in fish}
+                        pruned_b = baseline.prune_unknown_uuids(known)
+                        pruned_a = anomaly.prune_unknown_uuids(known)
+                        pruned_p = patterns.prune_unknown_uuids(known)
+                        if pruned_b or pruned_a or pruned_p:
+                            log.info(
+                                "Pruned stale fish state — baseline=%d anomaly=%d patterns=%d",
+                                pruned_b, pruned_a, pruned_p,
+                            )
                         # Re-sync schedules too (cheap)
                         async with AsyncSessionLocal() as db:
                             from convict.engines.knowledge.tank_knowledge_engine import list_schedules as _ls
@@ -260,7 +289,10 @@ class PipelineOrchestrator:
                         log.exception("Fish list refresh failed")
                     last_fish_refresh = now_mono
 
-                # Auto-registration: watches for stable tracks and creates fish profiles
+                # Auto-registration: watches for stable tracks and creates fish profiles.
+                # Stays inline (not via db_writer) because it needs to read the new fish
+                # back immediately after writing — registrar is a slow path, only invoked
+                # when a brand-new fish is auto-discovered (rare).
                 if auto_registrar is not None:
                     try:
                         async with AsyncSessionLocal() as db:
@@ -293,23 +325,21 @@ class PipelineOrchestrator:
                     await asyncio.to_thread(flow.update, frame, entities)
                     flow_events = flow.pop_events()
                     if flow_events:
-                        async with AsyncSessionLocal() as db:
-                            for ev in flow_events:
-                                predictor.record_event(ev)
-                                ev["schedule_context"] = _nearest_schedule(schedules)
-                                if tank:
-                                    await _persist_behavior_event(ev, tank.id, db)
-                                await broadcaster.broadcast({
-                                    "type":      "anomaly_flagged",
-                                    "timestamp": ev["started_at"],
-                                    "seq":       0,
-                                    "payload":   ev,
-                                })
-                            try:
-                                await db.commit()
-                            except Exception:
-                                log.exception("Flow event commit failed — rolling back")
-                                await db.rollback()
+                        from convict.pipeline.db_writer import db_writer as _db_writer
+                        _tank_id = tank.id if tank else None
+                        for ev in flow_events:
+                            predictor.record_event(ev)
+                            ev["schedule_context"] = _nearest_schedule(schedules)
+                            if _tank_id:
+                                async def _persist_flow(db, _ev=ev, _tid=_tank_id):
+                                    await _persist_behavior_event(_ev, _tid, db)
+                                _db_writer.enqueue(_persist_flow)
+                            await broadcaster.broadcast({
+                                "type":      "anomaly_flagged",
+                                "timestamp": ev["started_at"],
+                                "seq":       0,
+                                "payload":   ev,
+                            })
 
                     # Build overlay: merge flow data + prespawn set + feeding banner
                     _overlay = flow.get_overlay()
@@ -337,26 +367,23 @@ class PipelineOrchestrator:
                     new_events = anomaly.update(entities)
                     if new_events:
                         from convict.engines.control.device_controller import controller as _devices
+                        from convict.pipeline.db_writer import db_writer as _db_writer
                         tank_id = tank.id if tank else None
-                        async with AsyncSessionLocal() as db:
-                            for ev in new_events:
-                                predictor.record_event(ev)
-                                ev["schedule_context"] = _nearest_schedule(schedules)
-                                if tank_id:
-                                    await _persist_behavior_event(ev, tank_id, db)
-                                await broadcaster.broadcast({
-                                    "type":      "anomaly_flagged",
-                                    "timestamp": ev["started_at"],
-                                    "seq":       0,
-                                    "payload":   ev,
-                                })
-                                # Auto-respond with device actions (non-blocking)
-                                asyncio.create_task(_devices.on_anomaly(ev))
-                            try:
-                                await db.commit()
-                            except Exception:
-                                log.exception("Anomaly event commit failed — rolling back")
-                                await db.rollback()
+                        for ev in new_events:
+                            predictor.record_event(ev)
+                            ev["schedule_context"] = _nearest_schedule(schedules)
+                            if tank_id:
+                                async def _persist_anomaly(db, _ev=ev, _tid=tank_id):
+                                    await _persist_behavior_event(_ev, _tid, db)
+                                _db_writer.enqueue(_persist_anomaly)
+                            await broadcaster.broadcast({
+                                "type":      "anomaly_flagged",
+                                "timestamp": ev["started_at"],
+                                "seq":       0,
+                                "payload":   ev,
+                            })
+                            # Auto-respond with device actions (non-blocking)
+                            asyncio.create_task(_devices.on_anomaly(ev))
                 except Exception:
                     log.exception("Anomaly update/broadcast error")
 
@@ -409,6 +436,7 @@ class PipelineOrchestrator:
 
         while self._running:
             try:
+                self._task_heartbeats["predictor"] = time.monotonic()
                 await asyncio.sleep(settings.prediction_interval_seconds)
 
                 if not hasattr(self, "_predictor"):
@@ -500,6 +528,7 @@ class PipelineOrchestrator:
         dead_since: float | None = None
 
         while self._running:
+            self._task_heartbeats["watchdog"] = time.monotonic()
             await asyncio.sleep(5)
 
             try:
@@ -579,6 +608,7 @@ class PipelineOrchestrator:
         analyzer = VLMAnalyzer(settings)
 
         while self._running:
+            self._task_heartbeats["vlm"] = time.monotonic()
             await asyncio.sleep(settings.vlm_analysis_interval_s)
 
             jpeg = streamer._frame
@@ -685,6 +715,7 @@ class PipelineOrchestrator:
 
         try:
             while self._running:
+                self._task_heartbeats["camera2"] = time.monotonic()
                 try:
                     frame = await asyncio.wait_for(q2.get(), timeout=1.0)
                 except asyncio.TimeoutError:

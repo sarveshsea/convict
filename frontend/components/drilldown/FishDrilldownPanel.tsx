@@ -16,8 +16,9 @@ import { InteractionHistory } from "@/components/drilldown/InteractionHistory"
 import { BehaviorBaseline } from "@/components/drilldown/BehaviorBaseline"
 import { IdentityConfidenceChart } from "@/components/drilldown/IdentityConfidenceChart"
 import { EvidenceChain } from "@/components/drilldown/EvidenceChain"
+import { FeedingResponse } from "@/components/drilldown/FeedingResponse"
 
-type Tab = "heatmap" | "interactions" | "baseline" | "speed" | "evidence"
+type Tab = "heatmap" | "interactions" | "baseline" | "speed" | "evidence" | "feeding"
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "heatmap",      label: "Zone Heatmap" },
@@ -25,6 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "interactions", label: "Interactions" },
   { id: "speed",        label: "Speed History" },
   { id: "evidence",     label: "Evidence Chain" },
+  { id: "feeding",      label: "Feeding" },
 ]
 
 interface Fingerprint {
@@ -275,6 +277,7 @@ export function FishDrilldownPanel({ fishId }: Props) {
           {tab === "interactions" && <InteractionHistory events={events} fishUuid={fish.uuid} fishName={fish.name} edges={relEdges} nodeNames={relNodeNames} />}
           {tab === "speed"        && <IdentityConfidenceChart history={history} />}
           {tab === "evidence"     && <EvidenceChain fishUuid={fish.uuid} fishName={fish.name} />}
+          {tab === "feeding"      && <FeedingResponse fishUuid={fish.uuid} />}
         </div>
       </div>
     </div>

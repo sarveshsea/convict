@@ -107,6 +107,15 @@ class AnomalyDetector:
     def update_known_fish(self, fish: list) -> None:
         self._fish = fish
 
+    def prune_unknown_uuids(self, known_uuids: set[str]) -> int:
+        """Drop per-fish state whose key isn't in known_uuids. Returns prune count."""
+        pruned = 0
+        for d in (self._unseen, self._alerted, self._erratic_counts):
+            for stale in [k for k in list(d.keys()) if k not in known_uuids]:
+                del d[stale]
+                pruned += 1
+        return pruned
+
     def update(self, entities: list[dict]) -> list[dict]:
         """
         Call every frame. Returns list of new anomaly event dicts

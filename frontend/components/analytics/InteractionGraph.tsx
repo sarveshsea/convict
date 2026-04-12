@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { listEvents } from "@/lib/api"
 import { useTankStore } from "@/store/tankStore"
 import { useUIStore } from "@/store/uiStore"
@@ -288,6 +288,8 @@ export function InteractionGraph() {
   const [loading, setLoading] = useState(true)
   const [eventCount, setEventCount] = useState(0)
 
+  const fishKey = useMemo(() => fish.map((f) => f.uuid).join(","), [fish])
+
   // Load events and build graph
   useEffect(() => {
     listEvents(200).then((events) => {
@@ -298,7 +300,8 @@ export function InteractionGraph() {
       edgesRef.current = edges
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [fish.map((f) => f.uuid).join(",")])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fishKey])
 
   // Canvas sizing
   useEffect(() => {

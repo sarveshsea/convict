@@ -46,6 +46,20 @@ class BaselineBuilder:
         """Called by orchestrator after any fish-list refresh."""
         self._known_uuids = {f.uuid for f in fish_list}
 
+    def prune_unknown_uuids(self, known_uuids: set[str]) -> int:
+        """Drop per-fish state whose key isn't in known_uuids. Returns prune count."""
+        pruned = 0
+        for d in (self._zone_counts, self._speeds, self._by_hour, self._totals, self._proximity):
+            for stale in [k for k in list(d.keys()) if k not in known_uuids]:
+                del d[stale]
+                pruned += 1
+        # Proximity values are inner dicts also keyed by uuid
+        for partner_map in self._proximity.values():
+            for stale in [k for k in list(partner_map.keys()) if k not in known_uuids]:
+                del partner_map[stale]
+                pruned += 1
+        return pruned
+
     # ------------------------------------------------------------------
 
     def update(self, entities: list[dict]) -> None:

@@ -34,6 +34,14 @@ class PatternModeler:
     def update_known_fish(self, fish: list) -> None:
         self._fish = fish
 
+    def prune_unknown_uuids(self, known_uuids: set[str]) -> int:
+        """Drop per-fish color observation state for fish no longer known."""
+        pruned = 0
+        for stale in [k for k in list(self._color_obs.keys()) if k not in known_uuids]:
+            del self._color_obs[stale]
+            pruned += 1
+        return pruned
+
     def record_color_observation(self, fish_uuid: str, histogram_bytes: bytes) -> None:
         """
         Called by orchestrator every frame for each confidently-identified fish.

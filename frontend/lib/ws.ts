@@ -1,27 +1,42 @@
 "use client"
 import { WS_URL } from "./constants"
+import type { LiveEntity, PipelineStatus } from "@/store/observationStore"
+import type { AnomalyItem, PredictionItem, CommunityHealth } from "@/store/predictionStore"
 
-export type WSMessageType =
-  | "observation_frame"
-  | "identity_update"
-  | "anomaly_flagged"
-  | "prediction_created"
-  | "prediction_updated"
-  | "fish_updated"
-  | "event_detected"
-  | "pipeline_status"
-  | "baseline_updated"
-  | "vlm_analysis"
-  | "community_health"
+// ── Payload shapes ────────────────────────────────────────────────────────────
 
-export interface WSMessage<T = unknown> {
-  type: WSMessageType
-  timestamp: string
-  seq: number
-  payload: T
+export interface ObservationFramePayload {
+  entities?: LiveEntity[]
+  camera_index?: number
+  frame_width?: number
+  frame_height?: number
+  schedule_context?: string | null
+  night_mode?: boolean
 }
 
-type Listener<T = unknown> = (msg: WSMessage<T>) => void
+export interface VLMAnalysisPayload {
+  anomalies?: AnomalyItem[]
+}
+
+export interface FishUpdatedPayload {
+  reason?: string
+}
+
+// ── Discriminated union of all server messages ───────────────────────────────
+
+export type WSMessage =
+  | { type: "observation_frame"; timestamp: string; seq: number; payload: ObservationFramePayload }
+  | { type: "pipeline_status";   timestamp: string; seq: number; payload: PipelineStatus }
+  | { type: "anomaly_flagged";   timestamp: string; seq: number; payload: AnomalyItem }
+  | { type: "prediction_created"; timestamp: string; seq: number; payload: PredictionItem }
+  | { type: "prediction_updated"; timestamp: string; seq: number; payload: PredictionItem }
+  | { type: "fish_updated";      timestamp: string; seq: number; payload: FishUpdatedPayload }
+  | { type: "vlm_analysis";      timestamp: string; seq: number; payload: VLMAnalysisPayload }
+  | { type: "community_health";  timestamp: string; seq: number; payload: CommunityHealth }
+
+export type WSMessageType = WSMessage["type"]
+
+type Listener = (msg: WSMessage) => void
 
 class ConvictWS {
   private ws: WebSocket | null = null
@@ -41,10 +56,18 @@ class ConvictWS {
     this.ws = null
   }
 
-  on<T>(type: WSMessageType, fn: Listener<T>) {
+  on<K extends WSMessageType>(
+    type: K,
+    fn: (msg: Extract<WSMessage, { type: K }>) => void,
+  ): () => void {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
-    this.listeners.get(type)!.add(fn as Listener)
-    return () => this.listeners.get(type)?.delete(fn as Listener)
+    const wrapped: Listener = (msg) => {
+      if (msg.type === type) fn(msg as Extract<WSMessage, { type: K }>)
+    }
+    this.listeners.get(type)!.add(wrapped)
+    return () => {
+      this.listeners.get(type)?.delete(wrapped)
+    }
   }
 
   private _open() {
@@ -53,7 +76,7 @@ class ConvictWS {
 
     this.ws.onmessage = (e) => {
       try {
-        const msg: WSMessage = JSON.parse(e.data)
+        const msg = JSON.parse(e.data) as WSMessage
         this.listeners.get(msg.type)?.forEach((fn) => fn(msg))
       } catch {}
     }

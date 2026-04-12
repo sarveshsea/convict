@@ -57,6 +57,11 @@ _ENTROPY_SLOPE_THR  = -0.003
 # Grid dimensions for dead-zone detection
 _GRID_ROWS, _GRID_COLS = 3, 3
 
+# Sample one history entry every ~5 minutes (at ~6fps)
+_SAMPLE_INTERVAL_FRAMES = 1800
+# 24h of samples at 5min cadence = 288
+_HISTORY_MAX = 288
+
 
 class FlowAnalyzer:
     def __init__(self, settings):
@@ -98,6 +103,9 @@ class FlowAnalyzer:
         # Pending events — drained by orchestrator via pop_events()
         self._events: list[dict] = []
 
+        # Rolling 24h history of clarity/flow samples (every ~5min)
+        self._history: deque = deque(maxlen=_HISTORY_MAX)
+
     # ------------------------------------------------------------------
 
     def update(self, frame: np.ndarray, entities: list[dict]) -> None:
@@ -123,6 +131,22 @@ class FlowAnalyzer:
             "clarity_status": "degrading" if clarity < 0.52 else "ok",
             "dead_zones":     dead_zones,
         }
+
+        # Periodic time-series sample for /insights/clarity-history
+        if self._frame_count % _SAMPLE_INTERVAL_FRAMES == 0:
+            self.record_sample()
+
+    def record_sample(self) -> None:
+        """Append one clarity/flow sample to the rolling history."""
+        self._history.append({
+            "t":           datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "clarity":     self._overlay.get("clarity"),
+            "flow_status": self._overlay.get("flow_status"),
+            "flow_mag":    self._overlay.get("flow_mag"),
+        })
+
+    def get_history(self) -> list[dict]:
+        return list(self._history)
 
     def pop_events(self) -> list[dict]:
         """Drain pending anomaly events — called by orchestrator each frame."""

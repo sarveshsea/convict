@@ -68,6 +68,17 @@ export const listPredictions = (status = "active") =>
 export const resolvePrediction = (uuid: string, outcome: "resolved_correct" | "resolved_incorrect", notes?: string) =>
   request<{status: string}>(`/api/v1/observations/predictions/${uuid}/resolve?outcome=${outcome}${notes ? `&notes=${encodeURIComponent(notes)}` : ""}`, { method: "POST" })
 
+// ---- Health ----
+export const getHealth = () => request<HealthResponse>("/api/v1/health")
+
+// ---- Insights ----
+export const getClarityHistory = () =>
+  request<ClarityHistoryResponse>("/api/v1/insights/clarity-history")
+export const getFeedingResponse = (fishUuid: string, days = 7) =>
+  request<FeedingResponseData>(`/api/v1/insights/feeding-response?fish_uuid=${fishUuid}&days=${days}`)
+export const getBehaviorTransitions = (hours = 168) =>
+  request<BehaviorTransitionsResponse>(`/api/v1/insights/behavior-transitions?hours=${hours}`)
+
 // ---- Intelligence ----
 export const getCommunityHealth = (limit = 48) =>
   request<{ current: { score: number; components: Record<string, number>; computed_at: string } | null; trend: string; history: { computed_at: string; score: number }[] }>(
@@ -198,6 +209,59 @@ export interface ObstacleIn {
 export interface ObstacleOut extends ObstacleIn { uuid: string }
 export interface TankConfig {
   tank: TankDimensionsOut; cameras: CameraOut[]; obstacles: ObstacleOut[]
+}
+
+export interface ClaritySample {
+  t: string
+  clarity: number
+  flow_status: "ok" | "stalled" | "degrading"
+  flow_mag: number
+}
+export interface ClarityHistoryResponse {
+  samples: ClaritySample[]
+  current: { clarity: number | null; flow_status: string | null }
+}
+
+export interface FeedingResponseBucket {
+  minutes_offset: number
+  mean_speed: number
+  n: number
+}
+export interface FeedingResponseData {
+  buckets: FeedingResponseBucket[]
+  baseline_speed: number | null
+  fish_uuid: string | null
+  days: number
+}
+
+export interface BehaviorTransitionNode { id: string; count: number }
+export interface BehaviorTransitionEdge {
+  source: string
+  target: string
+  count: number
+  avg_gap_minutes: number
+}
+export interface BehaviorTransitionsResponse {
+  nodes: BehaviorTransitionNode[]
+  edges: BehaviorTransitionEdge[]
+  window_hours: number
+}
+
+export interface HealthResponse {
+  version: string
+  tasks: Record<string, { alive: boolean; last_tick_ago_s: number | null }>
+  ffmpeg: { hls1: "running" | "stopped"; hls2: "running" | "stopped"; hls1_pid: number | null; hls2_pid?: number | null }
+  ollama: { enabled: boolean; reachable: boolean; latency_ms: number | null; model: string }
+  plugs: { label: string; ip: string; reachable: boolean; is_on: boolean }[]
+  db: {
+    size_mb: number
+    behavior_events: number
+    interaction_edges: number
+    behavior_baselines: number
+    last_retention_run: string | null
+    last_retention_deleted: { behavior_events_deleted: number; interaction_edges_deleted: number; detection_frame_deleted: number } | null
+  }
+  writer: { queue_depth: number; dropped: number; committed: number; errors: number }
 }
 
 export { ApiError }
